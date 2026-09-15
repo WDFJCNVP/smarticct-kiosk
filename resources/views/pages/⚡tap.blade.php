@@ -23,43 +23,33 @@ new class extends Component
         $baseUrl = config('services.smarticct.api_url', 'https://smarticct.app');
 
         try {
-            // Outbound call from Localhost -> Azure Cloud Server
             $response = Http::acceptJson()
-                ->timeout(5) // Avoid freezing the screen if connection lags
+                ->timeout(5)
                 ->get("{$baseUrl}/api/card/" . trim($uid));
 
             $result = $response->json();
 
-            // dd($result);
-
-            // 1. Success
             if ($response->successful()) {
                 $this->cardData = $result['data'] ?? [];
 
-                // Store cloud data in local kiosk session
                 session([
                     'kiosk_card'        => $this->cardData,
                     'kiosk_user'        => $this->cardData['user'] ?? null,
+                    'kiosk_route_list'  => $result['route_list'] ?? null,
                     'kiosk_verified_at' => now()->toIso8601String(),
                 ]);
 
                 $this->status = 'granted';
 
-                // dd($this->cardData['user']['role']);
-
                 $this->redirect(route('menu.options'), navigate: true);
                 return;
             }
 
-            // if error (404, 422, etc)
             $this->status = 'error';
             $this->errorMessage = $result['message'] ?? 'Card verification rejected by server.';
             $this->dispatch('kiosk-reset-after-delay');
 
         } catch (ConnectionException $e) {
-
-            // Triggered when local machine has no internet
-
             Log::warning('Kiosk offline or cloud connection failed', ['error' => $e->getMessage()]);
 
             $this->status = 'error';
@@ -90,7 +80,6 @@ new class extends Component
         lastKeyTime: Date.now(),
         onKeydown(e) {
             if ($wire.status !== 'idle') return;
-
             const now = Date.now();
             if (now - this.lastKeyTime > 100) this.buffer = '';
             this.lastKeyTime = now;
@@ -99,7 +88,6 @@ new class extends Component
                 if (this.buffer.length > 0) {
                     const uid = this.buffer.trim().toUpperCase();
                     this.buffer = '';
-                    
                     if (/^[0-9A-Z]+$/i.test(uid) && uid.length >= 4) {
                         $wire.handleTap(uid);
                     }
@@ -111,27 +99,57 @@ new class extends Component
     }"
     @keydown.window="onKeydown($event)"
     @kiosk-reset-after-delay.window="setTimeout(() => $wire.resetToIdle(), 3500)"
-    class="flex h-screen w-full items-center justify-center text-black select-none"
+    class="flex min-h-full w-full flex-1 flex-col items-center justify-center p-6 text-center"
 >
-    @if ($status === 'idle')
-        <div class="text-center space-y-2">
-            <flux:heading size="xl" class="text-black">Tap your card to continue</flux:heading>
-            <p class="text-sm text-zinc-500">Hold your RFID card near the reader</p>
-        </div>
-    @elseif ($status === 'processing')
-        <div class="text-center space-y-2 animate-pulse">
-            <flux:heading size="xl" class="text-black">Connecting to cloud server...</flux:heading>
-            <p class="text-sm text-zinc-500">Verifying card registration...</p>
-        </div>
-    @elseif ($status === 'error')
-        <div class="text-center space-y-2 max-w-md px-4">
-            <flux:heading size="xl" class="text-red-600 font-bold">Unable to Proceed</flux:heading>
-            <p class="text-base text-zinc-800 font-medium">{{ $errorMessage }}</p>
-        </div>
-    @elseif ($status === 'granted')
-        <div class="text-center space-y-2">
-            <flux:heading size="xl" class="text-green-600 font-bold">Card Verified</flux:heading>
-            <p class="text-sm text-zinc-500">Redirecting to menu...</p>
-        </div>
-    @endif
+    <div class="w-full max-w-md rounded-3xl border border-white/15 bg-white/8 p-10 backdrop-blur-md">
+        @if ($status === 'idle')
+            <div class="space-y-6">
+                <div class="mx-auto flex size-32 items-center justify-center rounded-full bg-secondary/15 ring-1 ring-secondary/30">
+                    <flux:icon name="credit-card" class="size-16 text-secondary" />
+                </div>
+                <div class="space-y-1">
+                    <flux:heading size="xl" class="font-primary font-extrabold text-white">
+                        Tap your card to continue
+                    </flux:heading>
+                    <flux:text class="text-white/60">Hold your RFID card near the reader</flux:text>
+                </div>
+            </div>
+        @elseif ($status === 'processing')
+            <div class="animate-pulse space-y-6">
+                <div class="mx-auto flex size-32 items-center justify-center rounded-full bg-secondary/15 ring-1 ring-secondary/30">
+                    <flux:icon name="arrow-path" class="size-16 animate-spin text-secondary" />
+                </div>
+                <div class="space-y-1">
+                    <flux:heading size="xl" class="font-primary font-extrabold text-white">
+                        Verifying your card...
+                    </flux:heading>
+                    <flux:text class="text-white/60">Connecting to server</flux:text>
+                </div>
+            </div>
+        @elseif ($status === 'error')
+            <div class="space-y-6">
+                <div class="mx-auto flex size-32 items-center justify-center rounded-full bg-danger/15 ring-1 ring-danger/30">
+                    <flux:icon name="x-circle" class="size-16 text-danger" />
+                </div>
+                <div class="space-y-1">
+                    <flux:heading size="xl" class="font-primary font-extrabold text-danger">Unable to Proceed</flux:heading>
+                    <flux:text class="text-base font-medium text-white/80">{{ $errorMessage }}</flux:text>
+                </div>
+            </div>
+        @elseif ($status === 'granted')
+            <div class="space-y-6">
+                <div class="mx-auto flex size-32 items-center justify-center rounded-full bg-success/15 ring-1 ring-success/30">
+                    <flux:icon name="check-circle" class="size-16 text-success" />
+                </div>
+                <div class="space-y-1">
+                    <flux:heading size="xl" class="font-primary font-extrabold text-success">Card Verified</flux:heading>
+                    <flux:text class="text-white/60">Redirecting to menu...</flux:text>
+                </div>
+            </div>
+        @endif
+    </div>
+
+    <div class="mt-8">
+        <flux:button href="{{ route('login.options') }}" wire:navigate variant="ghost" icon="arrow-left" class="!text-white/70 hover:!text-white">Back</flux:button>
+    </div>
 </div>
