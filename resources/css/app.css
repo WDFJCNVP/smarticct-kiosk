@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400..800&family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&display=swap');
 @import 'tailwindcss';
 @import '../../vendor/livewire/flux/dist/flux.css';
 
@@ -6,7 +7,101 @@
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 
+/* ── Brand tokens — kept in sync with the main SmartICCT web app ── */
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-sans:      'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-primary:   'Plus Jakarta Sans', sans-serif;
+    --font-secondary: 'Outfit', sans-serif;
+
+    --color-primary:         #181E74;
+    --color-primary-hover:   #2330A8;
+    --color-secondary:       #C5A028;
+    --color-secondary-hover: #B8941F;
+
+    --color-light-primary:   #F5F6FA;
+    --color-light-secondary: #FFFFFF;
+    --color-light-subtle:    #ECEEF5;
+    --color-light-txt-primary: #181E74;
+    --color-light-txt-body:    #3D445C;
+    --color-light-txt-muted:   #5C6284;
+    --color-light-bd-default:  #E2E4EF;
+    --color-light-bd-strong:   #C8CBE0;
+
+    --color-dark-primary:    #0D1117;
+    --color-dark-secondary:  #13182A;
+    --color-dark-surface:    #1A1F2E;
+    --color-dark-subtle:     #222840;
+    --color-dark-txt-primary: #FFFFFF;
+    --color-dark-txt-body:    #FFFFFFBF;
+    --color-dark-txt-muted:   #FFFFFF8C;
+    --color-dark-bd-default:  #FFFFFF12;
+    --color-dark-bd-strong:   #FFFFFF26;
+
+    --color-success: #16A34A;
+    --color-warning: #D97706;
+    --color-danger:  #DC2626;
+    --color-info:    #2563EB;
+}
+
+.dark {
+    --color-secondary:       #FFD700;
+    --color-secondary-hover: #FFC000;
+}
+
+@layer base {
+    html, body {
+        font-family: var(--font-secondary);
+        background-color: var(--color-light-primary);
+        color: var(--color-light-txt-body);
+        height: 100%;
+    }
+    .dark html, .dark body {
+        background-color: var(--color-dark-primary);
+        color: var(--color-dark-txt-body);
+    }
+}
+
+/* ── Kiosk hardware behaviour ──
+   This runs on a fixed touchscreen terminal, not a general-purpose browser:
+   no text selection, no pinch-zoom drift, no accidental pull-to-refresh,
+   no visible scrollbars on the idle screens. */
+html, body {
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+input, textarea, [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+/* Large, obviously-tappable targets for every kiosk button */
+.kiosk-tap-target {
+    min-height: 4.5rem;
+    touch-action: manipulation;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: var(--color-light-bd-strong); border-radius: 9999px; }
+.dark ::-webkit-scrollbar-thumb { background: var(--color-dark-bd-strong); }
+
+@media (max-width: 639px) {
+    ui-toast,
+    ui-toast-group {
+        margin: 0 !important;
+        margin-top: calc(env(safe-area-inset-top, 0px) + 1rem) !important;
+        margin-bottom: auto !important;
+        margin-inline-start: 0.75rem !important;
+        margin-inline-end: 0.75rem !important;
+        max-width: none !important;
+        width: calc(100% - 1.5rem) !important;
+        justify-content: stretch;
+    }
+    ui-toast [data-flux-toast-dialog],
+    ui-toast-group [data-flux-toast-dialog] {
+        max-width: none !important;
+        width: 100% !important;
+    }
 }

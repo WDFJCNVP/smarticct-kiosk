@@ -27,9 +27,7 @@ new class extends Component
         $baseUrl = config('services.smarticct.api_url', 'https://smarticct.app');
 
         try {
-            $response = Http::acceptJson()
-                ->timeout(5)
-                ->get("{$baseUrl}/api/queued/routes");
+            $response = Http::acceptJson()->timeout(5)->get("{$baseUrl}/api/queued/routes");
 
             if ($response->successful()) {
                 $this->routes = $response->json('data') ?? [];
@@ -70,13 +68,9 @@ new class extends Component
 
         [$route, $type] = explode('|', $this->selectedRide);
 
-        return collect($this->routes[$route] ?? [])
-            ->firstWhere('type', $type);
+        return collect($this->routes[$route] ?? [])->firstWhere('type', $type);
     }
 
-    /**
-     * Execute fare payment using the tapped card in session.
-     */
     public function confirmPayment(): void
     {
         if (! $this->selectedVehicle || ! session()->has('kiosk_card')) {
@@ -87,7 +81,6 @@ new class extends Component
         $baseUrl = config('services.smarticct.api_url', 'https://smarticct.app');
 
         try {
-            // Trigger the tap API endpoint
             $response = Http::acceptJson()
                 ->timeout(8)
                 ->post("{$baseUrl}/api/cards/tap", [
@@ -100,28 +93,26 @@ new class extends Component
 
             $result = $response->json();
 
-
-            if ($result['success'] === true){
+            if ($result['success'] === true) {
 
                 Flux::toast(
                     duration: 5000,
                     variant: 'success',
-                    heading: 'Fare Payment Successfully',
-                    text: $result['message'] . " Please get your ticket! " ,
+                    heading: 'Fare Payment Successful',
+                    text: ($result['message'] ?? '') . ' Please get your ticket!',
                 );
 
                 $this->redirect(route('menu.options'), navigate: true);
 
                 return;
-            } else {
-
-                Flux::toast(
-                    duration: 5000,
-                    variant: 'warning',
-                    heading: 'warning',
-                    text: $result['message'],
-                );
             }
+
+            Flux::toast(
+                duration: 5000,
+                variant: 'warning',
+                heading: 'Payment Not Completed',
+                text: $result['message'] ?? 'Payment failed.',
+            );
 
             $this->dispatch('payment-failed', message: $result['message'] ?? 'Payment failed.');
         } catch (\Exception $e) {
@@ -131,18 +122,29 @@ new class extends Component
 };
 ?>
 
-<div class="grid grid-cols-1 gap-6 lg:grid-cols-3 select-none">
-
+<div class="mx-auto grid w-full max-w-7xl grid-cols-1 gap-6 p-4 select-none sm:p-6 lg:grid-cols-3">
 
     {{-- Left: Route List --}}
-    <div class="space-y-6 lg:col-span-2 max-h-[75vh] overflow-y-auto pr-2">
-            <flux:button href="{{ route('menu.options') }}" variant="primary">Back</flux:button>
+    <div class="max-h-[75vh] space-y-4 overflow-y-auto pr-2 lg:col-span-2">
+        <div class="flex items-center justify-between border-b border-white/10 pb-4">
+            <flux:heading size="xl" class="font-primary font-black tracking-tight text-white drop-shadow-sm">
+                Pay Your Fare
+            </flux:heading>
+            <flux:button href="{{ route('menu.options') }}" wire:navigate variant="ghost" icon="arrow-left" class="!text-white/70 hover:!text-white">Back</flux:button>
+        </div>
+
+        @if ($isOffline)
+            <div class="flex items-center gap-3 rounded-xl border border-warning/30 bg-warning/10 p-4 backdrop-blur-md">
+                <flux:icon name="exclamation-triangle" class="size-5 shrink-0 text-warning" />
+                <flux:text class="text-sm font-medium text-warning">Live queue is temporarily unavailable. Please ask terminal staff for assistance.</flux:text>
+            </div>
+        @endif
 
         @forelse ($routes as $routeName => $vehicles)
-            <flux:card class="space-y-4">
+            <flux:card class="space-y-4 !rounded-3xl !border !border-white/15 !bg-white/8 !backdrop-blur-md">
                 <div class="flex items-center gap-2">
-                    <flux:icon name="map-pin" class="size-5 text-zinc-400" />
-                    <flux:heading size="lg">{{ $routeName }}</flux:heading>
+                    <flux:icon name="map-pin" class="size-5 text-secondary" />
+                    <flux:heading size="lg" class="!text-white">{{ $routeName }}</flux:heading>
                 </div>
 
                 <flux:radio.group wire:model.live="selectedRide" variant="cards" class="max-sm:flex-col">
@@ -161,23 +163,16 @@ new class extends Component
                                     urgent: false,
                                     intervalId: null,
                                     init() {
-                                        if (!this.endTime) {
-                                            this.display = 'Departs when full';
-                                            return;
-                                        }
+                                        if (!this.endTime) { this.display = 'Departs when full'; return; }
                                         this.update();
                                         this.intervalId = setInterval(() => this.update(), 1000);
                                     },
-                                    destroy() {
-                                        if (this.intervalId) clearInterval(this.intervalId);
-                                    },
+                                    destroy() { if (this.intervalId) clearInterval(this.intervalId); },
                                     update() {
                                         if (!this.endTime) return;
                                         const remaining = this.endTime - Date.now();
                                         if (remaining <= 0) {
-                                            this.display = 'Departing now';
-                                            this.isDeparting = true;
-                                            this.urgent = false;
+                                            this.display = 'Departing now'; this.isDeparting = true; this.urgent = false;
                                             if (this.intervalId) clearInterval(this.intervalId);
                                             return;
                                         }
@@ -195,35 +190,29 @@ new class extends Component
                                     @if ($vehicle['is_full'])
                                         <flux:badge color="red" size="sm">Full</flux:badge>
                                     @else
-                                        <template x-if="isDeparting">
-                                            <flux:badge color="green" size="sm">Departing now</flux:badge>
-                                        </template>
-                                        <template x-if="!isDeparting && endTime">
-                                            <flux:badge color="amber" size="sm">Boarding</flux:badge>
-                                        </template>
-                                        <template x-if="!endTime">
-                                            <flux:badge color="zinc" size="sm">Waiting</flux:badge>
-                                        </template>
+                                        <template x-if="isDeparting"><flux:badge color="green" size="sm">Departing now</flux:badge></template>
+                                        <template x-if="!isDeparting && endTime"><flux:badge color="amber" size="sm">Boarding</flux:badge></template>
+                                        <template x-if="!endTime"><flux:badge color="zinc" size="sm">Waiting</flux:badge></template>
                                     @endif
                                 </div>
 
-                                <span class="text-sm text-zinc-500">
+                                <span class="text-sm text-light-txt-muted dark:text-dark-txt-muted">
                                     {{ $vehicle['capacity_current'] }}/{{ $vehicle['capacity_max'] }} seats
                                     &bull; ₱{{ number_format($vehicle['fare'], 2) }}
                                     &bull;
-                                    <span :class="urgent ? 'text-red-500 font-semibold' : ''" x-text="display"></span>
+                                    <span :class="urgent ? 'text-danger font-semibold' : ''" x-text="display"></span>
                                 </span>
                             </div>
                         </flux:radio>
                     @empty
-                        <div class="py-4 text-center text-xs text-zinc-400 italic">
+                        <div class="py-4 text-center text-xs italic text-white/50">
                             No vehicles currently loading at the terminal for this route.
                         </div>
                     @endforelse
                 </flux:radio.group>
             </flux:card>
         @empty
-            <flux:card class="p-8 text-center text-zinc-400">
+            <flux:card class="!rounded-3xl !border !border-white/15 !bg-white/8 p-8 text-center text-white/60 !backdrop-blur-md">
                 Loading available terminal queues...
             </flux:card>
         @endforelse
@@ -231,29 +220,21 @@ new class extends Component
 
     {{-- Right: Sticky Summary --}}
     <div class="lg:sticky lg:top-4 lg:self-start">
-        <flux:card class="space-y-4">
+        <flux:card class="space-y-4 !rounded-3xl !border !border-white/15 !bg-white/8 !backdrop-blur-md">
             <div class="flex items-center justify-between">
-                <flux:heading size="lg">Your Ride</flux:heading>
+                <flux:heading size="lg" class="!text-white">Your Ride</flux:heading>
                 @if ($selectedRide)
-                    <flux:button
-                        wire:click="clearSelection"
-                        variant="ghost"
-                        size="sm"
-                        icon="x-mark"
-                        aria-label="Remove selection"
-                    />
+                    <flux:button wire:click="clearSelection" variant="ghost" size="sm" icon="x-mark" aria-label="Remove selection" class="!text-white/70 hover:!text-white" />
                 @endif
             </div>
 
             @if (! $selectedRide)
-                <div class="flex flex-col items-center gap-2 py-10 text-center text-zinc-400">
+                <div class="flex flex-col items-center gap-2 py-10 text-center text-white/60">
                     <flux:icon name="ticket" class="size-8" />
-                    <flux:text>Select a route and vehicle to continue</flux:text>
+                    <flux:text class="!text-white/60">Select a route and vehicle to continue</flux:text>
                 </div>
             @else
-                @php
-                    $selectedTimestamp = $this->selectedVehicle['departs_at_timestamp'] ?? null;
-                @endphp
+                @php $selectedTimestamp = $this->selectedVehicle['departs_at_timestamp'] ?? null; @endphp
                 <div
                     class="space-y-3"
                     x-data="{
@@ -261,16 +242,11 @@ new class extends Component
                         display: '{{ $selectedTimestamp ? '--:--' : 'Departs when full' }}',
                         intervalId: null,
                         init() {
-                            if (!this.endTime) {
-                                this.display = 'Departs when full';
-                                return;
-                            }
+                            if (!this.endTime) { this.display = 'Departs when full'; return; }
                             this.update();
                             this.intervalId = setInterval(() => this.update(), 1000);
                         },
-                        destroy() {
-                            if (this.intervalId) clearInterval(this.intervalId);
-                        },
+                        destroy() { if (this.intervalId) clearInterval(this.intervalId); },
                         update() {
                             if (!this.endTime) return;
                             const remaining = this.endTime - Date.now();
@@ -287,39 +263,33 @@ new class extends Component
                     x-init="init()"
                 >
                     <div class="flex items-center justify-between">
-                        <flux:text class="text-zinc-500">Route</flux:text>
-                        <flux:text class="font-medium">{{ $this->selectedRoute }}</flux:text>
+                        <flux:text class="!text-white/60">Route</flux:text>
+                        <flux:text class="!text-white font-medium">{{ $this->selectedRoute }}</flux:text>
                     </div>
                     <div class="flex items-center justify-between">
-                        <flux:text class="text-zinc-500">Vehicle</flux:text>
-                        <flux:text class="font-medium">{{ $this->selectedVehicle['type'] }} ({{ $this->selectedVehicle['plate_number'] }})</flux:text>
+                        <flux:text class="!text-white/60">Vehicle</flux:text>
+                        <flux:text class="!text-white font-medium">{{ $this->selectedVehicle['type'] }} ({{ $this->selectedVehicle['plate_number'] }})</flux:text>
                     </div>
                     <div class="flex items-center justify-between">
-                        <flux:text class="text-zinc-500">Seats</flux:text>
-                        <flux:text class="font-medium">
-                            {{ $this->selectedVehicle['capacity_current'] }}/{{ $this->selectedVehicle['capacity_max'] }}
-                        </flux:text>
+                        <flux:text class="!text-white/60">Seats</flux:text>
+                        <flux:text class="!text-white font-medium">{{ $this->selectedVehicle['capacity_current'] }}/{{ $this->selectedVehicle['capacity_max'] }}</flux:text>
                     </div>
                     <div class="flex items-center justify-between">
-                        <flux:text class="text-zinc-500">Departure</flux:text>
-                        <flux:text class="font-medium" x-text="display"></flux:text>
+                        <flux:text class="!text-white/60">Departure</flux:text>
+                        <flux:text class="!text-white font-medium" x-text="display"></flux:text>
                     </div>
 
-                    <flux:separator />
+                    <flux:separator class="!border-white/10" />
 
                     <div class="flex items-center justify-between">
-                        <flux:heading size="base">Total Fare</flux:heading>
-                        <flux:heading size="base">₱{{ number_format($this->selectedVehicle['fare'], 2) }}</flux:heading>
+                        <flux:heading size="base" class="!text-white">Total Fare</flux:heading>
+                        <flux:heading size="base" class="!text-secondary">₱{{ number_format($this->selectedVehicle['fare'], 2) }}</flux:heading>
                     </div>
                 </div>
             @endif
 
             <flux:modal.trigger name="confirm-ride">
-                <flux:button
-                    variant="primary"
-                    class="w-full"
-                    :disabled="! $selectedRide"
-                >
+                <flux:button variant="primary" class="kiosk-tap-target w-full !bg-secondary !font-bold !text-primary hover:!bg-secondary-hover" :disabled="! $selectedRide">
                     Confirm &amp; Pay
                 </flux:button>
             </flux:modal.trigger>
@@ -331,23 +301,21 @@ new class extends Component
         <div class="space-y-6">
             <div>
                 <flux:heading size="lg">Confirm your ride</flux:heading>
-                <flux:text class="mt-2">
-                    Please review your selected route before paying.
-                </flux:text>
+                <flux:text class="mt-2">Please review your selected route before paying.</flux:text>
             </div>
 
             @if ($selectedRide)
-                <div class="space-y-3 rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800">
+                <div class="space-y-3 rounded-lg bg-light-subtle p-4 dark:bg-dark-subtle">
                     <div class="flex items-center justify-between">
-                        <flux:text class="text-zinc-500">Route</flux:text>
+                        <flux:text class="text-light-txt-muted dark:text-dark-txt-muted">Route</flux:text>
                         <flux:text class="font-medium">{{ $this->selectedRoute }}</flux:text>
                     </div>
                     <div class="flex items-center justify-between">
-                        <flux:text class="text-zinc-500">Vehicle</flux:text>
+                        <flux:text class="text-light-txt-muted dark:text-dark-txt-muted">Vehicle</flux:text>
                         <flux:text class="font-medium">{{ $this->selectedVehicle['type'] }}</flux:text>
                     </div>
                     <div class="flex items-center justify-between">
-                        <flux:text class="text-zinc-500">Plate Number</flux:text>
+                        <flux:text class="text-light-txt-muted dark:text-dark-txt-muted">Plate Number</flux:text>
                         <flux:text class="font-medium font-mono">{{ $this->selectedVehicle['plate_number'] }}</flux:text>
                     </div>
 
@@ -359,8 +327,8 @@ new class extends Component
                     </div>
                 </div>
 
-                <flux:text size="sm" class="text-zinc-400">
-                    This amount will be deducted from your RFID card.
+                <flux:text size="sm" class="text-light-txt-muted dark:text-dark-txt-muted">
+                    This amount will be deducted from your card.
                 </flux:text>
             @endif
 
