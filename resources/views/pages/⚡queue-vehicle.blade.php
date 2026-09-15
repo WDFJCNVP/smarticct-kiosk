@@ -4,6 +4,7 @@ use Livewire\Component;
 use Livewire\Attributes\Computed;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Services\ThermalReceiptService;
 
 new class extends Component
 {
@@ -16,7 +17,6 @@ new class extends Component
 
     public function mount(): void
     {
-        // 1. Guard: Ensure active session exists from card tap
         if (! session()->has('kiosk_card') || ! session()->has('kiosk_user')) {
             $this->redirect(route('login.tap'), navigate: true);
             return;
@@ -25,7 +25,6 @@ new class extends Component
         $this->card = session('kiosk_card', []);
         $this->user = session('kiosk_user', []);
 
-        // 2. Guard: Ensure the authenticated cardholder is an operator
         if (($this->user['role'] ?? '') !== 'operator') {
             $this->redirect(route('login.tap'), navigate: true);
             return;
@@ -33,7 +32,6 @@ new class extends Component
 
         $this->vehicles = $this->user['vehicles'] ?? [];
 
-        // Auto-select first vehicle if only one vehicle exists
         if (count($this->vehicles) === 1) {
             $this->selectedVehicleId = (int) $this->vehicles[0]['id'];
         }
@@ -84,9 +82,7 @@ new class extends Component
         $this->redirect(route('menu.options'), navigate: true);
     }
 
-    /**
-     * Submit queueing request to the live cloud API.
-     */
+
     public function confirmQueue(): void
     {
         if (! $this->selectedVehicle || $this->isProcessing) {
@@ -122,26 +118,37 @@ new class extends Component
 
             $result = $response->json();
 
-            // dd($result);
-
-            if ($result['success'] === true){
-                
-                $this->card['balance'] = $result['balance_after'] ?? $this->balanceAfterDeduction;
+            if ($result['success'] === true) {
+                $newBalance = $result['balance_after'] ?? $this->balanceAfterDeduction;
+                $this->card['balance'] = $newBalance;
                 session(['kiosk_card' => $this->card]);
 
+                $receiptData = [
+                    'reference_no'  => $result['reference_no'] ?? ('QFEE-' . now()->timestamp . '-' . $this->selectedVehicle['id']),
+                    'date'          => now()->format('m/d/y h:i A'),
+                    'operator_name' => $this->user['name'] ?? 'Unknown',
+                    'driver_name'   => $this->selectedVehicle['driver_name'] ?? $this->user['name'],
+                    'plate_number'  => $this->selectedVehicle['plate_number'],
+                    'vehicle_type'  => $this->selectedVehicle['vehicle_type'],
+                    'destination'   => $this->selectedVehicle['destination'] ?? 'N/A',
+                    'fee'           => $fee,
+                    'balance_after' => (float) $newBalance,
+                ];
+
+                //Print
+                ThermalReceiptService::printKioskQueueSlip($receiptData);
+
                 Flux::toast(
-                    duration : 5000,
+                    duration: 5000,
                     variant: 'success',
                     heading: 'Queued Successfully',
-                    text: $result['message'] . "Please get your ticket!",
+                    text: ($result['message'] ?? 'Vehicle queued successfully.') . ' Please take your receipt!',
                 );
 
                 $this->redirect(route('menu.options'), navigate: true);
-
                 return;
             } 
 
-            // Cloud API returned a business validation failure
             $this->errorMessage = $result['message'] ?? 'Unable to queue vehicle. Please try again.';
 
         } catch (\Exception $e) {

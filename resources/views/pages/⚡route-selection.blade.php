@@ -5,6 +5,7 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Services\ThermalReceiptService;
 
 new class extends Component
 {
@@ -74,9 +75,7 @@ new class extends Component
             ->firstWhere('type', $type);
     }
 
-    /**
-     * Execute fare payment using the tapped card in session.
-     */
+
     public function confirmPayment(): void
     {
         if (! $this->selectedVehicle || ! session()->has('kiosk_card')) {
@@ -84,10 +83,10 @@ new class extends Component
         }
 
         $card = session('kiosk_card');
+        $user = session('kiosk_user', []); // 1. Load user from session
         $baseUrl = config('services.smarticct.api_url', 'https://smarticct.app');
 
         try {
-            // Trigger the tap API endpoint
             $response = Http::acceptJson()
                 ->timeout(8)
                 ->post("{$baseUrl}/api/cards/tap", [
@@ -100,31 +99,49 @@ new class extends Component
 
             $result = $response->json();
 
+            if ($result['success'] === true) {
 
-            if ($result['success'] === true){
+                $newBalance = $result['balance_after'] ?? max(0, (float)($card['balance'] ?? 0) - (float)$this->selectedVehicle['fare']);
+                
+                $card['balance'] = $newBalance;
+                session(['kiosk_card' => $card]);
+
+                $receiptData = [
+                    'reference_no'   => $result['reference_no'] ?? ('FARE-' . now()->timestamp),
+                    'date'           => now()->format('m/d/y h:i A'),
+                    'passenger_name' => $user['name'] ?? 'Commuter',
+                    'passenger_type' => $user['commuter_type'] ?? 'Regular',
+                    'destination'    => $this->selectedRoute,
+                    'vehicle_type'   => $this->selectedVehicle['type'],
+                    'plate_number'   => $this->selectedVehicle['plate_number'] ?? 'N/A',
+                    'fare'           => (float) $this->selectedVehicle['fare'],
+                    'balance_after'  => (float) $newBalance,
+                ];
+
+                // Print
+                ThermalReceiptService::printCommuterFareSlip($receiptData);
 
                 Flux::toast(
                     duration: 5000,
                     variant: 'success',
-                    heading: 'Fare Payment Successfully',
-                    text: $result['message'] . " Please get your ticket! " ,
+                    heading: 'Fare Payment Successful',
+                    text: ($result['message'] ?? 'Fare paid.') . " Please get your ticket!",
                 );
 
                 $this->redirect(route('menu.options'), navigate: true);
-
                 return;
             } else {
-
                 Flux::toast(
                     duration: 5000,
                     variant: 'warning',
-                    heading: 'warning',
-                    text: $result['message'],
+                    heading: 'Payment Denied',
+                    text: $result['message'] ?? 'Unable to process fare payment.',
                 );
             }
 
             $this->dispatch('payment-failed', message: $result['message'] ?? 'Payment failed.');
         } catch (\Exception $e) {
+            Log::error('Commuter fare print/payment error', ['error' => $e->getMessage()]);
             $this->dispatch('payment-failed', message: 'Could not connect to payment processor.');
         }
     }
