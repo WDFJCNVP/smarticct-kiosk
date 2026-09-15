@@ -91,11 +91,6 @@ new class extends Component
         $this->redirect(route('menu.options'), navigate: true);
     }
 
-    /**
-     * Submit queueing request to the live cloud API. Driver name is required
-     * here because the operator's earnings are tracked per-driver in the
-     * back office, not per-vehicle.
-     */
     public function confirmQueue(): void
     {
         if (! $this->selectedVehicle || $this->isProcessing) {
@@ -142,6 +137,10 @@ new class extends Component
             if ($result['success'] === true) {
                 $newBalance = $result['balance_after'] ?? $this->balanceAfterDeduction;
                 $this->card['balance'] = $newBalance;
+                session(['kiosk_card' => $this->card]);
+
+                $receiptData = [
+                    'reference_no'  => $result['reference_no'] ?? ('QFEE-' . now()->timestamp . '-' . $this->selectedVehicle['id']),
                     'date'          => now()->format('m/d/y h:i A'),
                     'operator_name' => $this->user['name'] ?? 'Unknown',
                     'driver_name'   => $this->selectedVehicle['driver_name'] ?? $this->user['name'],
@@ -159,7 +158,11 @@ new class extends Component
                     duration: 5000,
                     variant: 'success',
                     heading: 'Queued Successfully',
+<<<<<<< HEAD
+                    text: ($result['message'] ?? 'Vehicle queued successfully.') . ' Please take your receipt!',
+=======
                     text: ($result['message'] ?? '') . " Please get your ticket!",
+>>>>>>> e2c557227c53abf44dbcdbfe14b413488a08db6c
                 );
 
                 $this->redirect(route('menu.options'), navigate: true);
