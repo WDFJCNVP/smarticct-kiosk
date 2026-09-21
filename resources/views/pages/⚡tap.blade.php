@@ -78,8 +78,10 @@ new class extends Component
     x-data="{
         buffer: '',
         lastKeyTime: Date.now(),
+        verifying: false,
+        minVerifyMs: 900,   // keep the 'Verifying…' modal up at least this long, even on a fast connection
         onKeydown(e) {
-            if ($wire.status !== 'idle') return;
+            if ($wire.status !== 'idle' || this.verifying) return;
             const now = Date.now();
             if (now - this.lastKeyTime > 100) this.buffer = '';
             this.lastKeyTime = now;
@@ -89,7 +91,9 @@ new class extends Component
                     const uid = this.buffer.trim().toUpperCase();
                     this.buffer = '';
                     if (/^[0-9A-Z]+$/i.test(uid) && uid.length >= 4) {
-                        $wire.handleTap(uid);
+                        // Show the modal immediately; the (unchanged) API call follows right after.
+                        this.verifying = true;
+                        setTimeout(() => $wire.handleTap(uid), this.minVerifyMs);
                     }
                 }
             } else if (e.key.length === 1) {
@@ -97,59 +101,23 @@ new class extends Component
             }
         }
     }"
+    x-init="$watch('$wire.status', s => { if (s === 'error' || s === 'idle') verifying = false; })"
     @keydown.window="onKeydown($event)"
-    @kiosk-reset-after-delay.window="setTimeout(() => $wire.resetToIdle(), 3500)"
-    class="flex min-h-full w-full flex-1 flex-col items-center justify-center p-6 text-center"
+    @kiosk-reset-after-delay.window="setTimeout(() => $wire.resetToIdle(), 8000)"
+    class="flex min-h-0 flex-1 flex-col items-center justify-center p-6 text-center"
 >
-    <div class="w-full max-w-md rounded-3xl border border-white/15 bg-white/8 p-10 backdrop-blur-md">
-        @if ($status === 'idle')
-            <div class="space-y-6">
-                <div class="mx-auto flex size-32 items-center justify-center rounded-full bg-secondary/15 ring-1 ring-secondary/30">
-                    <flux:icon name="credit-card" class="size-16 text-secondary" />
-                </div>
-                <div class="space-y-1">
-                    <flux:heading size="xl" class="font-primary font-extrabold text-white">
-                        Tap your card to continue
-                    </flux:heading>
-                    <flux:text class="text-white/60">Hold your RFID card near the reader</flux:text>
-                </div>
-            </div>
-        @elseif ($status === 'processing')
-            <div class="animate-pulse space-y-6">
-                <div class="mx-auto flex size-32 items-center justify-center rounded-full bg-secondary/15 ring-1 ring-secondary/30">
-                    <flux:icon name="arrow-path" class="size-16 animate-spin text-secondary" />
-                </div>
-                <div class="space-y-1">
-                    <flux:heading size="xl" class="font-primary font-extrabold text-white">
-                        Verifying your card...
-                    </flux:heading>
-                    <flux:text class="text-white/60">Connecting to server</flux:text>
-                </div>
-            </div>
-        @elseif ($status === 'error')
-            <div class="space-y-6">
-                <div class="mx-auto flex size-32 items-center justify-center rounded-full bg-danger/15 ring-1 ring-danger/30">
-                    <flux:icon name="x-circle" class="size-16 text-danger" />
-                </div>
-                <div class="space-y-1">
-                    <flux:heading size="xl" class="font-primary font-extrabold text-danger">Unable to Proceed</flux:heading>
-                    <flux:text class="text-base font-medium text-white/80">{{ $errorMessage }}</flux:text>
-                </div>
-            </div>
-        @elseif ($status === 'granted')
-            <div class="space-y-6">
-                <div class="mx-auto flex size-32 items-center justify-center rounded-full bg-success/15 ring-1 ring-success/30">
-                    <flux:icon name="check-circle" class="size-16 text-success" />
-                </div>
-                <div class="space-y-1">
-                    <flux:heading size="xl" class="font-primary font-extrabold text-success">Card Verified</flux:heading>
-                    <flux:text class="text-white/60">Redirecting to menu...</flux:text>
-                </div>
-            </div>
-        @endif
+    <div class="w-full max-w-2xl rounded-[2rem] border-2 border-white/15 bg-k-800 p-12">
+        <div x-show="!(verifying && $wire.status === 'idle')">
+            <x-kiosk.reader-status :status="$status" :error-message="$errorMessage" />
+        </div>
+        <div x-show="verifying && $wire.status === 'idle'" x-cloak>
+            <x-kiosk.reader-status status="processing" />
+        </div>
     </div>
 
     <div class="mt-8">
-        <flux:button href="{{ route('login.options') }}" wire:navigate variant="ghost" icon="arrow-left" class="!text-white/70 hover:!text-white">Back</flux:button>
+        <x-kiosk.button variant="second" href="{{ route('kiosk.home') }}" wire:navigate>
+            <flux:icon name="arrow-left" class="size-7" /> Back
+        </x-kiosk.button>
     </div>
 </div>

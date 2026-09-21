@@ -46,7 +46,6 @@ class ThermalReceiptService
         $receipt .= self::ESC . "E" . "\x01";
         $receipt .= self::makeRow("Queue Fee:", "PHP " . number_format($data['fee'], 2));
         $receipt .= self::ESC . "E" . "\x00";
-        $receipt .= self::makeRow("New Balance:", "PHP " . number_format($data['balance_after'], 2));
 
         // Footer
         $receipt .= "--------------------------------\n";
@@ -95,7 +94,6 @@ class ThermalReceiptService
         $receipt .= self::ESC . "E" . "\x01";
         $receipt .= self::makeRow("Fare Paid:", "PHP " . number_format($data['fare'], 2));
         $receipt .= self::ESC . "E" . "\x00";
-        $receipt .= self::makeRow("Card Balance:", "PHP " . number_format($data['balance_after'], 2));
 
         // Footer
         $receipt .= "--------------------------------\n";

@@ -134,36 +134,39 @@ new class extends Component
 
             $result = $response->json();
 
-            if ($result['success'] === true) {
+            if (($result['success'] ?? false) === true) {
                 $newBalance = $result['balance_after'] ?? $this->balanceAfterDeduction;
                 $this->card['balance'] = $newBalance;
                 session(['kiosk_card' => $this->card]);
 
                 $receiptData = [
-                    'reference_no'  => $result['reference_no'] ?? ('QFEE-' . now()->timestamp . '-' . $this->selectedVehicle['id']),
                     'date'          => now()->format('m/d/y h:i A'),
+                    'reference_no'  => $result['reference_no'] ?? ('KIOSK-' . now()->timestamp),
                     'operator_name' => $this->user['name'] ?? 'Unknown',
-                    'driver_name'   => $this->selectedVehicle['driver_name'] ?? $this->user['name'],
+                    'driver_name'   => $trimmedDriverName,
                     'plate_number'  => $this->selectedVehicle['plate_number'],
                     'vehicle_type'  => $this->selectedVehicle['vehicle_type'],
                     'destination'   => $this->selectedVehicle['destination'] ?? 'N/A',
                     'fee'           => $fee,
-                    'balance_after' => (float) $newBalance,
                 ];
 
-                //Print
-                ThermalReceiptService::printKioskQueueSlip($receiptData);
+                try {
+                    ThermalReceiptService::printKioskQueueSlip($receiptData);
+                } catch (\Throwable $printError) {
+                    // Don't let a printer/receipt failure look like a failed transaction —
+                    // the money has already moved and the vehicle is already queued.
+                    Log::error('Kiosk receipt print failed after successful tap', [
+                        'error' => $printError->getMessage(),
+                        'reference_no' => $receiptData['reference_no'],
+                    ]);
+                }
 
-                Flux::toast(
-                    duration: 5000,
-                    variant: 'success',
-                    heading: 'Queued Successfully',
-<<<<<<< HEAD
-                    text: ($result['message'] ?? 'Vehicle queued successfully.') . ' Please take your receipt!',
-=======
-                    text: ($result['message'] ?? '') . " Please get your ticket!",
->>>>>>> e2c557227c53abf44dbcdbfe14b413488a08db6c
-                );
+                // The menu screen shows the full-screen "take your ticket" confirmation
+                // from this flash (replaces the old corner toast). Nothing else changed here.
+                session()->flash('kiosk_done', [
+                    'kind'    => 'queue',
+                    'receipt' => $receiptData,
+                ]);
 
                 $this->redirect(route('menu.options'), navigate: true);
                 return;
@@ -181,235 +184,203 @@ new class extends Component
 };
 ?>
 
-<div class="mx-auto grid w-full max-w-7xl grid-cols-1 items-start gap-6 p-4 select-none sm:p-6 lg:grid-cols-3">
+@php
+    $registeredDriver = $this->selectedVehicle['driver_name'] ?? null;
+    $selectedFee      = (float) ($this->selectedVehicle['queueing_fee'] ?? 0);
+    $canQueue         = $this->selectedVehicle && $this->currentBalance >= $selectedFee;
+@endphp
 
-    {{-- Left: Operator Vehicles Lineup --}}
-    <div class="space-y-6 lg:col-span-2">
-        <div class="flex items-center justify-between border-b border-white/10 pb-4">
+<div
+    class="flex min-h-0 flex-1 flex-col"
+    x-data="{
+        confirming: false,
+        hasName() { return (this.$wire.driverName || '').trim() !== ''; }
+    }"
+    x-init="
+        $watch('$wire.errorMessage', v => { if (v) confirming = false });
+        $watch('$wire.driverNameError', v => { if (v) confirming = false });
+    "
+>
+    <div class="shrink-0 px-8 pb-3.5 pt-5">
+        <h1 class="font-primary text-[38px] font-extrabold leading-tight text-white">Which vehicle are you queueing?</h1>
+        <p class="mt-1 font-secondary text-xl text-tx-2">
+            Operator: <span class="font-semibold text-white">{{ $user['name'] ?? 'Unknown' }}</span>
+            &bull; Registered units: {{ count($vehicles) }}
+        </p>
+    </div>
+
+    @if ($errorMessage)
+        <div class="mx-8 mb-3 flex items-start gap-3 rounded-2xl border-2 border-stop/50 bg-stop/10 p-4">
+            <flux:icon name="exclamation-circle" class="mt-0.5 size-7 shrink-0 text-stop" />
             <div>
-                <flux:heading size="xl" class="font-primary font-black tracking-tight text-white drop-shadow-sm">
-                    Select Vehicle to Queue
-                </flux:heading>
-                <flux:text class="text-sm text-white/60">
-                    Operator: <span class="font-semibold text-white/85">{{ $user['name'] ?? 'Unknown' }}</span>
-                    &bull; Registered Units: {{ count($vehicles) }}
-                </flux:text>
+                <span class="block font-primary text-xl font-extrabold text-stop">Queue Denied</span>
+                <span class="font-secondary text-lg text-stop">{{ $errorMessage }}</span>
             </div>
-            <flux:button variant="ghost" size="sm" href="{{ route('menu.options') }}" wire:navigate icon="arrow-left" class="!text-white/70 hover:!text-white">
-                Cancel &amp; Exit
-            </flux:button>
         </div>
+    @endif
 
-        @if ($errorMessage)
-            <div class="flex items-start gap-3 rounded-xl border border-danger/30 bg-danger/10 p-4 backdrop-blur-md">
-                <flux:icon name="exclamation-circle" class="mt-0.5 size-5 shrink-0 text-danger" />
-                <div>
-                    <span class="block text-sm font-bold text-danger">Queue Denied</span>
-                    <span class="text-xs text-danger">{{ $errorMessage }}</span>
-                </div>
-            </div>
-        @endif
+    <div class="grid min-h-0 flex-1 grid-cols-[1.3fr_1fr] gap-6 px-8 pb-4">
 
-        <div class="max-h-[65vh] space-y-4 overflow-y-auto pr-2">
+        {{-- Left: the operator's vehicles --}}
+        <div class="min-h-0 space-y-3 overflow-y-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             @forelse ($vehicles as $vehicle)
                 @php
                     $isSelected = $selectedVehicleId === (int) $vehicle['id'];
-                    $fee = (float) ($vehicle['queueing_fee'] ?? 0.00);
-                    $canAfford = $this->currentBalance >= $fee;
+                    $fee        = (float) ($vehicle['queueing_fee'] ?? 0.00);
+                    $canAfford  = $this->currentBalance >= $fee;
                 @endphp
-
-                <flux:card
+                <button
+                    type="button"
                     wire:click="selectVehicle({{ $vehicle['id'] }})"
-                    class="!rounded-2xl !border-2 !bg-white/8 !backdrop-blur-md cursor-pointer transition-all duration-200 {{ $isSelected ? '!border-secondary !bg-secondary/10 shadow-md' : '!border-white/15 hover:!border-white/30' }} {{ ! $canAfford ? 'opacity-60' : '' }}"
+                    class="relative grid h-[132px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 overflow-hidden rounded-3xl border-2 px-6 text-left transition {{ $isSelected ? 'border-secondary bg-k-700 ring-2 ring-secondary' : ($canAfford ? 'border-white/15 bg-k-800' : 'border-stop/50 bg-k-800') }}"
                 >
-                    <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-                        <div class="space-y-1.5">
-                            <div class="flex items-center gap-2">
-                                <span class="font-mono text-xl font-black tracking-wider text-white">
-                                    {{ $vehicle['plate_number'] }}
-                                </span>
-                                <flux:badge color="{{ $vehicle['vehicle_type'] === 'Bus' ? 'blue' : ($vehicle['vehicle_type'] === 'UV-express' ? 'green' : 'yellow') }}" size="sm">
-                                    {{ $vehicle['vehicle_type'] }}
-                                </flux:badge>
-                                @if ($isSelected)
-                                    <flux:badge color="zinc" size="sm" icon="check">Selected</flux:badge>
-                                @endif
-                            </div>
+                    @if ($isSelected)
+                        <span class="absolute right-0 top-0 grid size-9 place-items-center rounded-bl-2xl bg-secondary text-primary">
+                            <flux:icon name="check" class="size-6 stroke-[2.5]" />
+                        </span>
+                    @endif
 
-                            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-white/60">
-                                <span><strong class="text-white/85">Route:</strong> {{ $vehicle['destination'] ?? 'Unassigned' }}</span>
-                                <span>&bull;</span>
-                                <span><strong class="text-white/85">Seats:</strong> {{ $vehicle['total_seats'] }}</span>
-                                <span>&bull;</span>
-                                <span><strong class="text-white/85">Registered Driver:</strong> {{ $vehicle['driver_name'] ?? 'Not set' }}</span>
-                            </div>
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-3">
+                            <x-kiosk.plate lg>{{ $vehicle['plate_number'] }}</x-kiosk.plate>
+                            <x-kiosk.vehicle-type :type="$vehicle['vehicle_type']" />
                         </div>
-
-                        <div class="shrink-0 sm:text-right">
-                            <span class="block text-[11px] font-bold uppercase tracking-wider text-white/50">Queue Fee</span>
-                            <span class="font-mono text-xl font-bold text-white">
-                                ₱{{ number_format($fee, 2) }}
-                            </span>
-                            @if (! $canAfford)
-                                <span class="block text-[11px] font-semibold text-danger">Insufficient Balance</span>
-                            @endif
+                        <div class="mt-2.5 flex items-center gap-2 font-secondary text-[22px] text-tx-2">
+                            <flux:icon name="map-pin" class="size-6 shrink-0" />
+                            <span class="truncate">{{ $vehicle['destination'] ?? 'Unassigned' }}</span>
                         </div>
                     </div>
-                </flux:card>
+
+                    <div class="text-right">
+                        <small class="block font-secondary text-base leading-none text-tx-3">Queue fee</small>
+                        <b class="font-primary text-4xl font-extrabold tabular-nums text-white">₱{{ number_format($fee, 2) }}</b>
+                        @unless ($canAfford)
+                            <div class="whitespace-nowrap font-secondary text-base font-bold text-stop">Not enough balance</div>
+                        @endunless
+                    </div>
+                </button>
             @empty
-                <flux:card class="!rounded-3xl !border !border-white/15 !bg-white/8 p-10 text-center text-white/60 !backdrop-blur-md">
-                    <flux:icon name="truck" class="mx-auto mb-2 size-10 opacity-50" />
-                    <flux:heading size="lg" class="!text-white">No registered vehicles found</flux:heading>
-                    <flux:text class="mt-1 text-sm text-white/60">
+                <div class="rounded-3xl border-2 border-white/15 bg-k-800 p-10 text-center">
+                    <flux:icon name="truck" class="mx-auto mb-3 size-12 text-tx-3" />
+                    <h2 class="font-primary text-2xl font-extrabold text-white">No registered vehicles found</h2>
+                    <p class="mt-2 font-secondary text-xl text-tx-2">
                         There are no vehicles linked to your operator account. Please contact dispatch or the terminal administrator.
-                    </flux:text>
-                </flux:card>
+                    </p>
+                </div>
             @endforelse
         </div>
-    </div>
 
-    {{-- Right: Sticky Summary Card --}}
-    <div class="space-y-4 lg:sticky lg:top-4 lg:self-start">
-        <flux:card class="space-y-5 !rounded-3xl !border !border-white/15 !bg-white/8 !backdrop-blur-md">
-            <div class="flex items-center justify-between">
-                <flux:heading size="lg" class="!text-white">Queue Summary</flux:heading>
-                @if ($selectedVehicleId)
-                    <flux:button wire:click="clearSelection" variant="ghost" size="sm" icon="x-mark" aria-label="Remove selection" class="!text-white/70 hover:!text-white" />
-                @endif
-            </div>
-
+        {{-- Right: driver + details for the chosen vehicle --}}
+        <div class="min-h-0">
             @if (! $this->selectedVehicle)
-                <div class="flex flex-col items-center gap-2 py-10 text-center text-white/60">
-                    <flux:icon name="ticket" class="size-8 opacity-40" />
-                    <flux:text class="!text-white/60">Select a vehicle on the left to review queue details</flux:text>
+                <div class="flex h-full flex-col items-center justify-center gap-4 rounded-3xl border-2 border-white/15 bg-k-800 p-8 text-center">
+                    <flux:icon name="truck" class="size-14 text-tx-3" />
+                    <p class="font-secondary text-2xl text-tx-2">Choose a vehicle to queue</p>
                 </div>
             @else
-                <div class="space-y-3">
-                    <div class="flex items-center justify-between text-sm">
-                        <flux:text class="!text-white/60">Plate Number</flux:text>
-                        <span class="font-mono font-bold text-white">{{ $this->selectedVehicle['plate_number'] }}</span>
-                    </div>
+                <div class="flex h-full flex-col gap-4 overflow-y-auto rounded-3xl border-2 border-white/15 bg-k-800 p-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    <div>
+                        <div class="mb-2 flex items-center justify-between">
+                            <h2 class="font-primary text-[26px] font-extrabold text-white">Driver on duty</h2>
+                            <button type="button" wire:click="clearSelection" class="rounded-xl px-3 py-2 font-secondary text-lg font-semibold text-tx-2" aria-label="Remove selection">Clear</button>
+                        </div>
 
-                    <div class="flex items-center justify-between text-sm">
-                        <flux:text class="!text-white/60">Vehicle Type</flux:text>
-                        <span class="font-medium text-white">{{ $this->selectedVehicle['vehicle_type'] }}</span>
-                    </div>
+                        <label for="driver-name" class="mb-2 block font-secondary text-lg font-semibold text-tx-2">Driver's full name</label>
+                        <div class="flex h-[68px] items-center gap-3 rounded-[1.125rem] border-2 bg-k-700 px-5 focus-within:border-secondary focus-within:ring-[3px] focus-within:ring-secondary/30 {{ $driverNameError ? 'border-stop' : 'border-white/30' }}">
+                            <flux:icon name="user" class="size-6 shrink-0 text-tx-3" />
+                            <input
+                                id="driver-name"
+                                type="text"
+                                wire:model="driverName"
+                                autocomplete="off"
+                                placeholder="Enter the driver's full name"
+                                class="h-full w-full bg-transparent font-secondary text-[24px] text-white placeholder:text-tx-3 focus:outline-none"
+                            >
+                        </div>
 
-                    <div class="flex items-center justify-between text-sm">
-                        <flux:text class="!text-white/60">Terminal Destination</flux:text>
-                        <span class="font-medium text-white">{{ $this->selectedVehicle['destination'] ?? 'N/A' }}</span>
-                    </div>
-
-                    <flux:separator class="!border-white/10" />
-
-                    {{-- Driver name — required. This is what ties the trip's
-                         earnings to the correct driver in the back office. --}}
-                    <flux:field>
-                        <flux:label class="!text-white/80">Driver on Duty</flux:label>
-                        <flux:input
-                            wire:model="driverName"
-                            placeholder="Enter driver's full name"
-                            icon="user"
-                            required
-                        />
                         @if ($driverNameError)
-                            <flux:error>{{ $driverNameError }}</flux:error>
+                            <p class="mt-2 font-secondary text-lg font-semibold text-stop">{{ $driverNameError }}</p>
                         @else
-                            <flux:description class="!text-white/50">Used to record this trip's earnings for the correct driver.</flux:description>
+                            <p class="mt-2 font-secondary text-lg leading-snug text-tx-3">
+                                {{ $registeredDriver ? 'Pre-filled with the registered driver. Change it if someone else is driving.' : "Used to record this trip's earnings for the correct driver." }}
+                            </p>
                         @endif
-                    </flux:field>
-
-                    <flux:separator class="!border-white/10" />
-
-                    <div class="flex items-center justify-between text-sm">
-                        <flux:text class="!text-white/60">Current Card Balance</flux:text>
-                        <span class="font-mono text-white">₱{{ number_format($this->currentBalance, 2) }}</span>
                     </div>
 
-                    <div class="flex items-center justify-between text-sm">
-                        <flux:text class="!text-white/60">Queueing Fee</flux:text>
-                        <span class="font-mono font-bold text-danger">- ₱{{ number_format($this->selectedVehicle['queueing_fee'], 2) }}</span>
-                    </div>
-
-                    <div class="flex items-center justify-between pt-1 text-sm">
-                        <flux:text class="!text-white/60">Remaining Balance</flux:text>
-                        <span class="font-mono font-bold text-success">₱{{ number_format($this->balanceAfterDeduction, 2) }}</span>
-                    </div>
-
-                    <flux:separator class="!border-white/10" />
-
-                    <div class="flex items-center justify-between">
-                        <flux:heading size="base" class="!text-white">Total Fee</flux:heading>
-                        <flux:heading size="xl" class="font-black !text-secondary">
-                            ₱{{ number_format($this->selectedVehicle['queueing_fee'], 2) }}
-                        </flux:heading>
-                    </div>
+                    <dl class="mt-auto divide-y divide-white/15 text-xl">
+                        <div class="flex items-center justify-between gap-4 py-2.5"><dt class="text-tx-2">Destination</dt><dd class="font-bold text-white">{{ $this->selectedVehicle['destination'] ?? 'N/A' }}</dd></div>
+                        <div class="flex items-center justify-between gap-4 py-2"><dt class="text-tx-2">Vehicle</dt><dd><x-kiosk.vehicle-type :type="$this->selectedVehicle['vehicle_type']" /></dd></div>
+                        <div class="flex items-center justify-between gap-4 py-2.5"><dt class="text-tx-2">Seats</dt><dd class="font-bold text-white">{{ $this->selectedVehicle['total_seats'] }}</dd></div>
+                    </dl>
                 </div>
             @endif
-
-            <flux:modal.trigger name="confirm-queue-modal">
-                <flux:button
-                    variant="primary"
-                    class="kiosk-tap-target w-full !bg-secondary !font-bold !text-primary hover:!bg-secondary-hover"
-                    :disabled="! $this->selectedVehicle || $this->currentBalance < (float)($this->selectedVehicle['queueing_fee'] ?? 0)"
-                >
-                    Confirm &amp; Queue Vehicle
-                </flux:button>
-            </flux:modal.trigger>
-        </flux:card>
+        </div>
     </div>
 
-    {{-- Confirmation Modal --}}
-    <flux:modal name="confirm-queue-modal" class="min-w-[24rem]">
-        <div class="space-y-6">
-            <div>
-                <flux:heading size="lg">Confirm Queue Entry</flux:heading>
-                <flux:text class="mt-2 text-sm text-light-txt-muted dark:text-dark-txt-muted">
-                    Please verify the vehicle and driver before confirming. The queueing fee will be deducted from your card.
-                </flux:text>
+    <x-kiosk.action-bar>
+        <x-slot:back>
+            <x-kiosk.button variant="second" href="{{ route('menu.options') }}" wire:navigate>
+                <flux:icon name="arrow-left" class="size-7" /> Back
+            </x-kiosk.button>
+        </x-slot:back>
+
+        @if (! $this->selectedVehicle)
+            <span wire:key="q-empty" class="font-secondary text-[22px] text-tx-3">Choose a vehicle to see the fee</span>
+        @elseif (! $canQueue)
+            <div wire:key="q-warn" class="flex items-center gap-3 font-primary text-xl font-bold text-stop">
+                <flux:icon name="exclamation-triangle" class="size-7" /> Not enough balance. Add funds at the cashier.
             </div>
+        @else
+            <div wire:key="q-math" class="flex items-center gap-5">
+                <div><small class="block font-secondary text-base leading-tight text-tx-3">Card balance</small><b class="font-primary text-2xl font-extrabold tabular-nums text-white">₱{{ number_format($this->currentBalance, 2) }}</b></div>
+                <span class="mt-3.5 text-2xl font-bold text-tx-3">−</span>
+                <div><small class="block font-secondary text-base leading-tight text-tx-3">Queue fee</small><b class="font-primary text-2xl font-extrabold tabular-nums text-white">₱{{ number_format($selectedFee, 2) }}</b></div>
+                <span class="mt-3.5 text-2xl font-bold text-tx-3">=</span>
+                <div><small class="block font-secondary text-base leading-tight text-tx-3">After</small><b class="font-primary text-2xl font-extrabold tabular-nums text-go">₱{{ number_format($this->balanceAfterDeduction, 2) }}</b></div>
+            </div>
+        @endif
 
-            @if ($this->selectedVehicle)
-                <div class="space-y-3 rounded-xl border border-light-bd-default bg-light-subtle p-4 dark:border-dark-bd-default dark:bg-dark-subtle/60">
-                    <div class="flex items-center justify-between text-sm">
-                        <span class="text-light-txt-muted dark:text-dark-txt-muted">Plate Number</span>
-                        <span class="font-mono font-bold text-light-txt-primary dark:text-dark-txt-primary">{{ $this->selectedVehicle['plate_number'] }}</span>
-                    </div>
-
-                    <div class="flex items-center justify-between text-sm">
-                        <span class="text-light-txt-muted dark:text-dark-txt-muted">Vehicle Type</span>
-                        <span class="font-medium text-light-txt-primary dark:text-dark-txt-primary">{{ $this->selectedVehicle['vehicle_type'] }}</span>
-                    </div>
-
-                    <div class="flex items-center justify-between text-sm">
-                        <span class="text-light-txt-muted dark:text-dark-txt-muted">Destination</span>
-                        <span class="font-medium text-light-txt-primary dark:text-dark-txt-primary">{{ $this->selectedVehicle['destination'] }}</span>
-                    </div>
-
-                    <div class="flex items-center justify-between text-sm">
-                        <span class="text-light-txt-muted dark:text-dark-txt-muted">Driver on Duty</span>
-                        <span class="font-medium text-light-txt-primary dark:text-dark-txt-primary">{{ $driverName ?: '—' }}</span>
-                    </div>
-
-                    <flux:separator />
-
-                    <div class="flex items-center justify-between text-base">
-                        <span class="font-bold">Queueing Fee</span>
-                        <span class="font-mono font-bold text-success dark:text-dark-success">₱{{ number_format($this->selectedVehicle['queueing_fee'], 2) }}</span>
-                    </div>
-                </div>
+        <x-slot:primary>
+            @if ($canQueue)
+                <x-kiosk.button wire:key="q-cta-go" size="xl" class="w-[290px]" x-show="hasName()" @click="confirming = true">Queue vehicle</x-kiosk.button>
+                <x-kiosk.button wire:key="q-cta-name" variant="off" size="xl" class="w-[290px]" x-show="!hasName()" x-cloak @click="document.getElementById('driver-name')?.focus()">Add driver name</x-kiosk.button>
+            @else
+                <x-kiosk.button wire:key="q-cta-off" variant="off" size="xl" class="w-[290px]" disabled>{{ $this->selectedVehicle ? 'Not enough balance' : 'Choose a vehicle' }}</x-kiosk.button>
             @endif
+        </x-slot:primary>
+    </x-kiosk.action-bar>
 
-            <div class="flex gap-2">
-                <flux:spacer />
-                <flux:modal.close>
-                    <flux:button variant="ghost">Cancel</flux:button>
-                </flux:modal.close>
-                <flux:button variant="primary" wire:click="confirmQueue" wire:loading.attr="disabled">
-                    <span wire:loading.remove wire:target="confirmQueue">Confirm &amp; Deduct Fee</span>
-                    <span wire:loading wire:target="confirmQueue">Processing Queue...</span>
-                </flux:button>
+    {{-- Confirm queue entry --}}
+    @if ($this->selectedVehicle)
+        <div x-show="confirming" x-cloak class="fixed inset-0 z-40 flex items-center justify-center bg-k-950/80 p-6">
+            <div class="w-[700px] rounded-[2rem] border-2 border-white/30 bg-k-800 p-9 shadow-2xl">
+                <h2 class="font-primary text-[34px] font-extrabold leading-tight text-white">Queue this vehicle?</h2>
+                <p class="mt-2 font-secondary text-xl text-tx-2">Please verify the vehicle and driver. The queueing fee will be deducted from your card.</p>
+
+                <div class="mb-2 mt-4 flex items-center gap-3">
+                    <flux:icon name="map-pin" class="size-8 text-secondary" />
+                    <span class="font-primary text-[32px] font-extrabold text-white">Iriga → {{ $this->selectedVehicle['destination'] ?? 'N/A' }}</span>
+                </div>
+                <div class="mb-3 flex items-center gap-3">
+                    <x-kiosk.plate>{{ $this->selectedVehicle['plate_number'] }}</x-kiosk.plate>
+                    <x-kiosk.vehicle-type :type="$this->selectedVehicle['vehicle_type']" />
+                </div>
+
+                <dl class="divide-y divide-white/15 text-[22px]">
+                    <div class="flex items-center justify-between gap-4 py-3"><dt class="text-tx-2">Driver on duty</dt><dd class="truncate font-bold text-white" x-text="$wire.driverName || '—'">—</dd></div>
+                    <div class="flex items-center justify-between gap-4 py-3"><dt class="text-tx-2">Queueing fee</dt><dd class="font-primary text-[38px] font-extrabold text-secondary tabular-nums">₱{{ number_format($selectedFee, 2) }}</dd></div>
+                </dl>
+
+                <div class="mt-6 flex gap-4">
+                    <x-kiosk.button variant="second" size="xl" class="w-[210px]" @click="confirming = false" wire:loading.attr="disabled" wire:target="confirmQueue">Cancel</x-kiosk.button>
+                    <x-kiosk.button size="xl" class="flex-1" wire:click="confirmQueue" wire:loading.attr="disabled" wire:target="confirmQueue">
+                        <span wire:loading.remove wire:target="confirmQueue">Confirm &amp; deduct fee</span>
+                        <span wire:loading.inline-flex wire:target="confirmQueue" class="items-center gap-3">
+                            <flux:icon name="arrow-path" class="size-7 animate-spin" /> Processing queue...
+                        </span>
+                    </x-kiosk.button>
+                </div>
             </div>
         </div>
-    </flux:modal>
+    @endif
 </div>

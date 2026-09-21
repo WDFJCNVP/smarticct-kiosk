@@ -1,3 +1,11 @@
+@php
+    // Attract screen (home) gets the terminal photo; every task screen is solid navy.
+    $isAttract   = request()->routeIs('kiosk.home');
+    $isSignedIn  = session()->has('kiosk_card');
+    $kioskName   = (string) data_get(session('kiosk_user'), 'name', 'Cardholder');
+    $nameParts   = preg_split('/\s+/', trim($kioskName)) ?: [];
+    $initials    = strtoupper(mb_substr($nameParts[0] ?? 'C', 0, 1) . (count($nameParts) > 1 ? mb_substr(end($nameParts), 0, 1) : ''));
+@endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="dark h-full">
     <head>
@@ -17,35 +25,75 @@
         <style>
             :root.dark { color-scheme: dark; }
         </style>
+
     </head>
     <body class="h-full overflow-hidden antialiased">
-        <div class="fixed inset-0 overflow-hidden bg-dark-primary">
-            <div
-                class="absolute inset-0 scale-110 bg-cover bg-center opacity-90"
-                style="background-image: url('{{ asset('images/terminal-bg.jpeg') }}')"
-            ></div>
-            <div class="absolute inset-0 bg-gradient-to-b from-[#0B0F2A]/85 via-[#10143A]/80 to-[#0B0F2A]/92"></div>
-        </div>
+        <div class="kiosk-stage">
+        @if ($isAttract)
+            <div class="fixed inset-0 overflow-hidden bg-k-950">
+                {{-- origin-bottom + scale crops the top edge of the photo --}}
+                <div
+                    class="absolute inset-0 origin-bottom scale-110 bg-cover bg-[position:50%_30%]"
+                    style="background-image: url('{{ asset('images/terminal-bg.jpeg') }}')"
+                ></div>
+                <div class="absolute inset-0 bg-gradient-to-r from-k-950/95 via-k-950/80 to-k-950/10"></div>
+                <div class="absolute inset-0 bg-gradient-to-t from-k-950/95 via-transparent to-transparent"></div>
+            </div>
+        @else
+            <div class="fixed inset-0 bg-k-900 [background-image:radial-gradient(900px_420px_at_88%_-8%,rgba(255,215,0,.07),transparent_62%)]"></div>
+        @endif
 
-        <div class="flex h-screen flex-col">
-            <header class="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-white/5 px-4 py-3 backdrop-blur-md sm:px-8">
-                <a href="{{ route('kiosk.home') }}" wire:navigate class="flex items-center gap-3">
-                    <img src="{{ asset('images/logo.png') }}" alt="SmartICCT" class="h-9 w-auto sm:h-10">
+        <div class="relative flex h-full flex-col">
+            {{-- App bar: who is signed in + sign out, and the date/time. Nothing else. --}}
+            <header class="relative z-20 flex shrink-0 items-center justify-between {{ $isAttract ? 'h-[104px] px-10 pt-3' : 'h-[72px] border-b border-white/15 bg-k-950 px-8' }}">
+                <a href="{{ route('kiosk.home') }}" wire:navigate class="flex items-center gap-3.5">
+                    <img src="{{ asset('images/logo.png') }}" alt="SmartICCT" class="h-[46px] w-auto">
                     <div class="flex flex-col leading-tight">
-                        <span class="font-primary text-base font-bold text-white sm:text-lg">SmartICCT Kiosk</span>
-                        <span class="font-secondary text-xs text-white/60">Iriga City Central Terminal</span>
+                        <span class="font-primary text-[22px] font-extrabold text-white">SmartICCT</span>
+                        <span class="font-secondary text-base text-tx-3">Iriga City Central Terminal</span>
                     </div>
                 </a>
 
-                <div
-                    x-data="{ now: new Date() }"
-                    x-init="setInterval(() => now = new Date(), 1000)"
-                    class="font-secondary text-sm font-medium text-white/70 tabular-nums"
-                    x-text="now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })"
-                ></div>
+                <div class="flex items-center gap-3.5">
+                    @if ($isSignedIn)
+                        {{-- Tapping the name opens "My Card" (card + balance). The balance itself is never shown in the bar. --}}
+                        <a
+                            href="{{ route('view.balance') }}"
+                            wire:navigate
+                            class="flex h-14 max-w-[340px] items-center gap-3.5 rounded-full border-2 border-white/30 bg-k-800 py-0 pl-[7px] pr-6 text-white"
+                            aria-label="My card — {{ $kioskName }}"
+                        >
+                            <span class="grid size-[42px] shrink-0 place-items-center rounded-full bg-secondary font-primary text-[17px] font-extrabold tracking-wide text-primary">{{ $initials }}</span>
+                            <span class="truncate text-[19px] font-bold">{{ $kioskName }}</span>
+                        </a>
+
+                        <a
+                            href="{{ route('kiosk.reset') }}"
+                            class="flex h-14 items-center gap-2 rounded-2xl border-2 border-white/30 px-5 text-lg font-bold text-white transition hover:bg-white/10"
+                        >
+                            <flux:icon name="arrow-right-start-on-rectangle" class="size-6" />
+                            Sign out
+                        </a>
+                    @endif
+
+                    <div
+                        x-data="{ now: new Date() }"
+                        x-init="setInterval(() => now = new Date(), 1000)"
+                        class="min-w-[150px] text-right leading-[1.15] {{ $isAttract ? 'rounded-2xl border border-white/15 bg-k-950/70 px-4 py-2' : '' }}"
+                    >
+                        <div
+                            class="whitespace-nowrap font-secondary text-base font-medium text-tx-3"
+                            x-text="now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })"
+                        ></div>
+                        <div
+                            class="font-primary text-2xl font-extrabold text-white tabular-nums"
+                            x-text="now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })"
+                        ></div>
+                    </div>
+                </div>
             </header>
 
-            <main class="flex flex-1 flex-col overflow-y-auto">
+            <main class="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
                 {{ $slot }}
             </main>
         </div>
@@ -60,7 +108,7 @@
             <div
                 x-data="{
                     idleMs: 45000,
-                    graceSec: 15,
+                    graceSec: 60,
                     warning: false,
                     remaining: 15,
                     idleTimer: null,
@@ -100,30 +148,40 @@
                     x-show="warning"
                     x-cloak
                     x-transition.opacity
-                    class="fixed inset-0 z-50 flex items-center justify-center bg-[#0B0F2A]/90 p-6 backdrop-blur-sm"
+                    class="fixed inset-0 z-50 flex items-center justify-center bg-k-950/90 p-6"
                 >
-                    <div class="w-full max-w-md rounded-3xl border border-white/15 bg-white/10 p-8 text-center backdrop-blur-md">
-                        <flux:heading size="xl" class="font-primary font-extrabold text-white">
-                            Are you still there?
-                        </flux:heading>
+                    <div class="w-full max-w-xl rounded-[2rem] border-2 border-white/30 bg-k-800 p-9 text-center shadow-2xl">
+                        <div class="relative mx-auto size-[150px]">
+                            <svg class="-rotate-90" width="150" height="150" viewBox="0 0 150 150" aria-hidden="true">
+                                <circle cx="75" cy="75" r="62" fill="none" stroke="rgb(255 255 255 / .14)" stroke-width="12" />
+                                <circle
+                                    cx="75" cy="75" r="62" fill="none" stroke-width="12" stroke-linecap="round"
+                                    class="stroke-secondary"
+                                    stroke-dasharray="389.6"
+                                    :stroke-dashoffset="389.6 * (1 - remaining / graceSec)"
+                                />
+                            </svg>
+                            <div class="absolute inset-0 grid place-items-center font-primary text-5xl font-extrabold text-white tabular-nums" x-text="remaining"></div>
+                        </div>
 
-                        <p class="mt-3 font-secondary text-white/70">
+                        <h2 class="mt-5 font-primary text-[34px] font-extrabold text-white">Are you still there?</h2>
+
+                        <p class="mb-7 mt-2 font-secondary text-2xl text-tx-2">
                             Signing out in
-                            <span class="font-mono text-2xl font-bold text-secondary tabular-nums" x-text="remaining"></span>
+                            <span class="font-bold text-secondary tabular-nums" x-text="remaining"></span>
                             seconds
                         </p>
 
-                        <button
-                            type="button"
-                            @click="stayActive()"
-                            class="kiosk-tap-target mt-7 w-full rounded-2xl bg-secondary px-6 text-xl font-bold text-primary shadow-lg shadow-secondary/20 transition hover:bg-secondary-hover"
-                        >
-                            I'm still here
-                        </button>
+                        <div class="flex gap-4">
+                            <x-kiosk.button variant="second" size="xl" class="flex-1" href="{{ route('kiosk.reset') }}">Sign out now</x-kiosk.button>
+                            <x-kiosk.button size="xl" class="flex-1" @click="stayActive()">I'm still here</x-kiosk.button>
+                        </div>
                     </div>
                 </div>
             </div>
         @endif
+
+        </div>{{-- /kiosk-stage --}}
 
         @livewireScripts
         @fluxScripts

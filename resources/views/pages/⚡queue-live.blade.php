@@ -43,97 +43,85 @@ new class extends Component
 };
 ?>
 
-<div class="mx-auto w-full max-w-5xl space-y-6 p-4 sm:p-8" wire:poll.15s="fetchLiveRoutes">
+@php
+    // One row per vehicle, soonest departure first; full and "leaves when full" vehicles sink to the bottom.
+    $rows = collect($routes)
+        ->flatMap(fn ($vehicles, $routeName) => collect($vehicles)->map(fn ($vehicle) => $vehicle + ['route' => $routeName]))
+        ->sort(fn ($a, $b) => [(int) $a['is_full'], $a['departs_at_timestamp'] ?? PHP_INT_MAX] <=> [(int) $b['is_full'], $b['departs_at_timestamp'] ?? PHP_INT_MAX])
+        ->values();
 
-    <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
-        <flux:heading size="xl" class="font-primary font-extrabold text-white drop-shadow-sm">Live Queue</flux:heading>
-        <flux:button href="{{ route('kiosk.home') }}" wire:navigate variant="ghost" icon="arrow-left" class="!text-white/70 hover:!text-white">Back</flux:button>
+    $isSignedIn = session()->has('kiosk_card');
+    $isOperator = data_get(session('kiosk_user'), 'role') === 'operator';
+    $cols = 'grid grid-cols-[minmax(0,1.7fr)_minmax(0,2.8fr)_150px_120px_160px] items-center gap-4 px-5';
+@endphp
+
+<div class="flex min-h-0 flex-1 flex-col" wire:poll.15s="fetchLiveRoutes">
+    <div class="shrink-0 px-8 pb-2 pt-5">
+        <h1 class="font-primary text-[38px] font-extrabold leading-tight text-white">Live queue</h1>
+        <p class="mt-1 flex items-center gap-2 font-secondary text-xl text-tx-2">
+            <span class="size-2.5 rounded-full bg-go"></span> Updates as vehicles board
+        </p>
     </div>
 
     @if ($isOffline)
-        <div class="flex items-center gap-3 rounded-xl border border-warning/30 bg-warning/10 p-4 backdrop-blur-md">
-            <flux:icon name="exclamation-triangle" class="size-5 shrink-0 text-warning" />
-            <flux:text class="text-sm font-medium text-warning">Live queue is temporarily unavailable. Please ask terminal staff for assistance.</flux:text>
+        <div class="mx-8 mb-2 flex items-center gap-3 rounded-2xl border-2 border-wait/50 bg-wait/10 p-4">
+            <flux:icon name="exclamation-triangle" class="size-6 shrink-0 text-wait" />
+            <p class="font-secondary text-xl font-medium text-wait">Live queue is temporarily unavailable. Please ask terminal staff for assistance.</p>
         </div>
     @endif
 
-    <div class="space-y-5">
-        @forelse ($routes as $routeName => $vehicles)
-            <flux:card class="space-y-4 !rounded-3xl !border !border-white/15 !bg-white/8 !backdrop-blur-md">
-                <div class="flex items-center gap-2">
-                    <flux:icon name="map-pin" class="size-5 text-secondary" />
-                    <flux:heading size="lg" class="!text-white">{{ $routeName }}</flux:heading>
-                </div>
+    <div class="px-8">
+        <div class="{{ $cols }} h-11 font-secondary text-[17px] font-semibold text-tx-3">
+            <div>Destination</div><div>Vehicle</div><div>Seats</div><div>Fare</div><div class="text-center">Leaves</div>
+        </div>
+    </div>
 
-                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    @forelse ($vehicles as $vehicle)
-                        @php $timestamp = $vehicle['departs_at_timestamp'] ?? null; @endphp
-                        <div
-                            class="rounded-xl border border-white/10 bg-white/5 p-4 {{ $vehicle['is_full'] ? 'opacity-60' : '' }}"
-                            x-data="{
-                                endTime: {{ $timestamp ? (int) $timestamp : 'null' }},
-                                display: '{{ $timestamp ? '--:--' : 'Departs when full' }}',
-                                isDeparting: false,
-                                urgent: false,
-                                intervalId: null,
-                                init() {
-                                    if (!this.endTime) { this.display = 'Departs when full'; return; }
-                                    this.update();
-                                    this.intervalId = setInterval(() => this.update(), 1000);
-                                },
-                                destroy() { if (this.intervalId) clearInterval(this.intervalId); },
-                                update() {
-                                    if (!this.endTime) return;
-                                    const remaining = this.endTime - Date.now();
-                                    if (remaining <= 0) {
-                                        this.display = 'Departing now'; this.isDeparting = true; this.urgent = false;
-                                        if (this.intervalId) clearInterval(this.intervalId);
-                                        return;
-                                    }
-                                    this.urgent = remaining < 30000;
-                                    const m = String(Math.floor(remaining / 60000)).padStart(2, '0');
-                                    const s = String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0');
-                                    this.display = `${m}:${s} left`;
-                                }
-                            }"
-                            x-init="init()"
-                        >
-                            <div class="flex items-center justify-between gap-2">
-                                <span class="font-semibold text-white">{{ $vehicle['type'] }}</span>
-                                @if ($vehicle['is_full'])
-                                    <flux:badge color="red" size="sm">Full</flux:badge>
-                                @else
-                                    <template x-if="isDeparting"><flux:badge color="green" size="sm">Departing now</flux:badge></template>
-                                    <template x-if="!isDeparting && endTime"><flux:badge color="amber" size="sm">Boarding</flux:badge></template>
-                                    <template x-if="!endTime"><flux:badge color="zinc" size="sm">Waiting</flux:badge></template>
-                                @endif
-                            </div>
-                            <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-white/60">
-                                <span>{{ $vehicle['capacity_current'] }}/{{ $vehicle['capacity_max'] }} seats</span>
-                                <span>&bull;</span>
-                                <span class="font-semibold text-success">₱{{ number_format($vehicle['fare'], 2) }}</span>
-                                <span>&bull;</span>
-                                <span :class="urgent ? 'text-danger font-semibold' : ''" x-text="display"></span>
-                            </div>
-                        </div>
-                    @empty
-                        <div class="col-span-full py-2 text-center text-sm italic text-white/50">
-                            No vehicles currently loading for this route.
-                        </div>
-                    @endforelse
+    <div class="kiosk-fade-bottom min-h-0 flex-1 overflow-y-auto px-8 pb-10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        @forelse ($rows as $vehicle)
+            @php
+                $ratio = ($vehicle['capacity_max'] ?? 0) > 0 ? $vehicle['capacity_current'] / $vehicle['capacity_max'] : 0;
+                $bar   = $vehicle['is_full'] ? 'bg-stop' : ($ratio > .8 ? 'bg-wait' : 'bg-go');
+            @endphp
+            <div class="{{ $cols }} mb-2 h-[84px] rounded-[1.125rem] border-2 border-white/15 bg-k-800 {{ $vehicle['is_full'] ? 'opacity-60' : '' }}">
+                <div class="truncate font-primary text-[28px] font-extrabold leading-tight text-white">{{ $vehicle['route'] }}</div>
+                <div class="flex items-center gap-3">
+                    <x-kiosk.plate>{{ $vehicle['plate_number'] ?? '—' }}</x-kiosk.plate>
+                    <x-kiosk.vehicle-type :type="$vehicle['type']" />
                 </div>
-            </flux:card>
+                <div>
+                    <div class="font-secondary text-lg text-tx-2">{{ $vehicle['capacity_current'] }} of {{ $vehicle['capacity_max'] }}</div>
+                    <div class="mt-1.5 h-2 w-[130px] overflow-hidden rounded-full bg-white/15">
+                        <div class="{{ $bar }} h-full rounded-full" style="width: {{ round($ratio * 100) }}%"></div>
+                    </div>
+                </div>
+                <div class="font-primary text-[26px] font-extrabold tabular-nums text-white">₱{{ number_format($vehicle['fare'], 2) }}</div>
+                <x-kiosk.eta :timestamp="$vehicle['departs_at_timestamp'] ?? null" :full="(bool) $vehicle['is_full']" size="sm" />
+            </div>
         @empty
-            <flux:card class="!rounded-3xl !border !border-white/15 !bg-white/8 p-10 text-center text-white/60 !backdrop-blur-md">
-                <flux:icon name="queue-list" class="mx-auto mb-2 size-10 opacity-50" />
-                Loading available terminal queues...
-            </flux:card>
+            <div class="flex flex-col items-center justify-center gap-3 py-16 text-center">
+                <flux:icon name="queue-list" class="size-10 text-tx-3" />
+                <p class="font-secondary text-2xl text-tx-2">Loading available terminal queues...</p>
+            </div>
         @endforelse
     </div>
 
-    <div class="pt-2 text-center">
-        <flux:button href="{{ route('login.options') }}" wire:navigate variant="primary" class="kiosk-tap-target !rounded-xl !bg-secondary !font-bold !text-primary hover:!bg-secondary-hover">
-            Ready to ride? Sign in to pay your fare
-        </flux:button>
-    </div>
+    <x-kiosk.action-bar>
+        <x-slot:back>
+            <x-kiosk.button variant="second" href="{{ $isSignedIn ? route('menu.options') : route('kiosk.home') }}" wire:navigate>
+                <flux:icon name="arrow-left" class="size-7" /> Back
+            </x-kiosk.button>
+        </x-slot:back>
+
+        <x-slot:primary>
+            @if ($isSignedIn)
+                <x-kiosk.button size="xl" href="{{ $isOperator ? route('queue.vehicle') : route('route.select') }}" wire:navigate>
+                    <flux:icon name="ticket" class="size-7" /> {{ $isOperator ? 'Queue a vehicle' : 'Pay fare' }}
+                </x-kiosk.button>
+            @else
+                <x-kiosk.button size="xl" href="{{ route('kiosk.home') }}" wire:navigate>
+                    <flux:icon name="credit-card" class="size-7" /> Ready to ride? Sign in to pay
+                </x-kiosk.button>
+            @endif
+        </x-slot:primary>
+    </x-kiosk.action-bar>
 </div>

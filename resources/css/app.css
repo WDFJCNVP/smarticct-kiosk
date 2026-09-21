@@ -105,3 +105,71 @@ input, textarea, [contenteditable="true"] {
         width: 100% !important;
     }
 }
+
+@theme {
+    --color-k-950: #0A0E30;   /* app bar, action bar   */
+    --color-k-900: #0F1440;   /* screen ground         */
+    --color-k-800: #171D57;   /* cards, panels         */
+    --color-k-700: #212972;   /* raised / selected     */
+    --color-k-600: #2D379A;
+
+    --color-tx-2: #D3D7F5;    /* secondary text */
+    --color-tx-3: #AEB4E0;    /* muted text     */
+
+    --color-go:   #5EE59A;    /* boarding · success   */
+    --color-wait: #FFC940;    /* waiting              */
+    --color-stop: #FF8A8A;    /* full · error         */
+}
+
+[x-cloak] { display: none !important; }
+
+/* Scroll areas fade out at the bottom instead of cutting off */
+.kiosk-fade-bottom {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), transparent);
+            mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), transparent);
+}
+
+/* Card-tap pulse rings on the attract screen */
+.kiosk-ring {
+    position: absolute;
+    border-radius: 9999px;
+    border: 3px solid rgb(255 215 0 / .7);
+    animation: kiosk-ring 2.4s ease-out infinite;
+}
+@keyframes kiosk-ring {
+    0%   { transform: scale(.6); opacity: .9; }
+    100% { transform: scale(1.5); opacity: 0; }
+}
+
+/* Success screen */
+.kiosk-pop { animation: kiosk-pop .6s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes kiosk-pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+.kiosk-shrink { animation: kiosk-shrink 12s linear forwards; }
+@keyframes kiosk-shrink { to { transform: scaleX(0); } }
+
+.kiosk-ticket {
+    transform: translateY(-100%);
+    animation: kiosk-print 1.6s .25s cubic-bezier(.3, .7, .3, 1) forwards;
+    -webkit-mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / 16px 100%;
+            mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / 16px 100%;
+}
+@keyframes kiosk-print { to { transform: translateY(0); } }
+
+@media (prefers-reduced-motion: reduce) {
+    .kiosk-ring, .kiosk-pop, .kiosk-shrink { animation: none; }
+    .kiosk-ticket { animation: none; transform: none; }
+}
+
+:root { --k-scale: 0.9; }
+
+.kiosk-stage {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: calc(100vw / var(--k-scale));
+    height: calc(100dvh / var(--k-scale));
+    transform: scale(var(--k-scale));
+    transform-origin: 0 0;
+    overflow: hidden;
+}

@@ -6,6 +6,7 @@ new class extends Component
 {
     public array $card = [];
     public array $user = [];
+    public ?array $done = null; // set by a just-completed payment / queue entry (see x-kiosk.done)
 
     public function mount()
     {
@@ -16,6 +17,7 @@ new class extends Component
 
         $this->card = session('kiosk_card', []);
         $this->user = session('kiosk_user', []);
+        $this->done = session('kiosk_done');
 
         if (session('queue_success')) {
             Flux::toast(
@@ -36,90 +38,65 @@ new class extends Component
 
 @php
     $isOperator = ($user['role'] ?? '') === 'operator';
+    $firstName  = \Illuminate\Support\Str::of($user['name'] ?? 'Cardholder')->before(' ');
+    $tile = 'kiosk-tap-target flex h-[150px] flex-col items-start justify-between rounded-3xl border-2 border-white/30 bg-k-800 p-6 text-left transition hover:bg-k-700';
 @endphp
 
-<div class="flex min-h-full w-full flex-1 flex-col items-center justify-center p-6 sm:p-10">
-    <div class="w-full max-w-3xl space-y-8">
+<div class="flex min-h-0 flex-1 flex-col">
+    @if ($done)
+        <x-kiosk.done :done="$done" :is-operator="$isOperator" />
+    @else
+        {{-- The balance is deliberately NOT on this screen — anyone standing behind you can
+             read it. It lives on "My Card", one tap away. --}}
+        <div class="mx-auto flex w-full max-w-4xl flex-1 flex-col justify-center gap-6 px-10 py-8">
 
-        {{-- Identity strip: who the kiosk thinks you are. Balance used to live
-             here too, but that made it show up in two places at once (here
-             AND on the "Check Card Balance" screen) — one source of truth,
-             so it only lives behind the tile now. --}}
-        <div class="flex items-center gap-3 rounded-2xl border border-white/15 bg-white/8 px-5 py-4 backdrop-blur-md">
-            <div class="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary/15 ring-1 ring-secondary/30">
-                <flux:icon name="{{ $isOperator ? 'truck' : 'user' }}" class="size-5 text-secondary" />
-            </div>
-            <div class="min-w-0">
-                <p class="truncate font-primary text-lg font-bold text-white sm:text-xl">
-                    {{ $user['name'] ?? 'Cardholder' }}
-                </p>
-                <p class="font-secondary text-xs uppercase tracking-wide text-white/50">
+            <div class="flex items-center justify-between gap-4">
+                <h1 class="font-primary text-[38px] font-extrabold text-white">Hello, {{ $firstName }}</h1>
+                <span class="rounded-full border border-white/25 bg-k-800 px-4 py-1.5 font-secondary text-lg font-semibold capitalize text-tx-2">
                     {{ $user['role'] ?? 'Cardholder' }}
-                </p>
+                </span>
+            </div>
+
+            {{-- Hero action: whatever this person came to do --}}
+            <a
+                href="{{ $isOperator ? route('queue.vehicle') : route('route.select') }}"
+                wire:navigate
+                class="kiosk-tap-target flex h-[250px] flex-col items-start justify-between rounded-[1.75rem] bg-secondary p-8 text-left text-primary shadow-[0_10px_0_rgba(0,0,0,.3)] transition hover:bg-secondary-hover"
+            >
+                <flux:icon name="{{ $isOperator ? 'truck' : 'ticket' }}" class="size-16" />
+                <div>
+                    <div class="font-primary text-5xl font-extrabold leading-tight tracking-tight">{{ $isOperator ? 'Queue a vehicle' : 'Pay fare' }}</div>
+                    <div class="mt-1 font-secondary text-2xl font-medium text-primary/85">
+                        {{ $isOperator ? 'Pick a vehicle and pay the queue fee' : 'Pick a destination and pay from your card' }}
+                    </div>
+                </div>
+            </a>
+
+            <div class="grid grid-cols-3 gap-5">
+                <a href="{{ route('view.routes') }}" wire:navigate class="{{ $tile }}">
+                    <flux:icon name="map" class="size-10 text-secondary" />
+                    <div>
+                        <div class="font-primary text-2xl font-extrabold text-white">Routes &amp; fares</div>
+                        <div class="font-secondary text-lg text-tx-3">All destinations</div>
+                    </div>
+                </a>
+
+                <a href="{{ route('guest.queue') }}" wire:navigate class="{{ $tile }}">
+                    <flux:icon name="queue-list" class="size-10 text-secondary" />
+                    <div>
+                        <div class="font-primary text-2xl font-extrabold text-white">Live queue</div>
+                        <div class="font-secondary text-lg text-tx-3">What's boarding now</div>
+                    </div>
+                </a>
+
+                <a href="{{ route('view.balance') }}" wire:navigate class="{{ $tile }}">
+                    <flux:icon name="credit-card" class="size-10 text-secondary" />
+                    <div>
+                        <div class="font-primary text-2xl font-extrabold text-white">My card</div>
+                        <div class="font-secondary text-lg text-tx-3">Balance &amp; details</div>
+                    </div>
+                </a>
             </div>
         </div>
-
-        {{-- Hero action. Whatever this person came to the kiosk to do, it's
-             this — so it gets the whole width and none of the competition. --}}
-        <flux:button
-            href="{{ $isOperator ? route('queue.vehicle') : route('route.select') }}"
-            wire:navigate
-            variant="primary"
-            class="kiosk-tap-target !h-40 w-full !flex-col !gap-3 !rounded-3xl !bg-secondary !text-2xl !font-bold !text-primary !shadow-lg !shadow-secondary/25 transition hover:!bg-secondary-hover sm:!h-44 sm:!text-3xl"
-        >
-            <flux:icon name="{{ $isOperator ? 'truck' : 'ticket' }}" class="size-14" />
-            {{ $isOperator ? 'Queue Vehicle' : 'Pay Fare' }}
-        </flux:button>
-
-        {{-- Secondary actions: deliberately smaller and quieter than the hero.
-             These are "while I'm here" tasks, not why anyone walked up. --}}
-        <div class="grid grid-cols-3 gap-3 sm:gap-4">
-            <flux:button
-                href="{{ route('view.routes') }}"
-                wire:navigate
-                variant="ghost"
-                class="kiosk-tap-target !h-28 !flex-col !gap-2 !rounded-2xl !border !border-white/15 !bg-white/8 !text-sm !font-semibold !text-white !backdrop-blur-md transition hover:!border-white/25 hover:!bg-white/14 sm:!text-base"
-            >
-                <flux:icon name="map" class="size-7 text-secondary sm:size-8" />
-                Routes &amp; Fares
-            </flux:button>
-
-            <flux:button
-                href="{{ route('guest.queue') }}"
-                wire:navigate
-                variant="ghost"
-                class="kiosk-tap-target !h-28 !flex-col !gap-2 !rounded-2xl !border !border-white/15 !bg-white/8 !text-sm !font-semibold !text-white !backdrop-blur-md transition hover:!border-white/25 hover:!bg-white/14 sm:!text-base"
-            >
-                <flux:icon name="queue-list" class="size-7 text-secondary sm:size-8" />
-                Live Queue
-            </flux:button>
-
-            <flux:button
-                href="{{ route('view.balance') }}"
-                wire:navigate
-                variant="ghost"
-                class="kiosk-tap-target !h-28 !flex-col !gap-2 !rounded-2xl !border !border-white/15 !bg-white/8 !text-sm !font-semibold !text-white !backdrop-blur-md transition hover:!border-white/25 hover:!bg-white/14 sm:!text-base"
-            >
-                <flux:icon name="credit-card" class="size-7 text-secondary sm:size-8" />
-                Check Card Balance
-            </flux:button>
-        </div>
-
-        {{-- Sign out — still the quietest action on the screen, but a proper
-             bordered pill with breathing room instead of a squashed inline
-             text link. --}}
-        <div class="flex justify-center">
-            <flux:button
-                wire:click="signOut"
-                variant="ghost"
-                class="!h-14 !w-full !max-w-xs !rounded-2xl !border !border-white/10 !bg-white/5 !text-base !font-semibold !text-white/70 transition hover:!border-danger/30 hover:!bg-danger/10 hover:!text-danger"
-            >
-                <span class="inline-flex items-center gap-2">
-                    <flux:icon name="arrow-right-start-on-rectangle" class="size-5" />
-                    Sign Out
-                </span>
-            </flux:button>
-        </div>
-
-    </div>
+    @endif
 </div>
