@@ -2,6 +2,8 @@
 
 use Livewire\Component;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
+use Livewire\Attributes\Validate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Services\ThermalReceiptService;
@@ -16,6 +18,14 @@ new class extends Component
     public ?string $errorMessage = null;
     public ?string $driverNameError = null;
     public bool $isProcessing = false;
+
+    #[Validate('required|digits:6')]
+    public ?string $pin_number = null;
+
+    public ?string $pinError = null;
+
+    #[Locked]
+    public ?int $pinVerifiedAt = null;
 
     public function mount(): void
     {
@@ -91,9 +101,54 @@ new class extends Component
         $this->redirect(route('menu.options'), navigate: true);
     }
 
+    public function verifyPin(): void
+    {
+        $this->pinError = null;
+        $this->validateOnly('pin_number');
+
+        $baseUrl = config('services.smarticct.api_url', 'https://smarticct.app');
+
+        try {
+            $response = Http::withoutVerifying()
+                ->acceptJson()
+                ->timeout(6)
+                ->post("{$baseUrl}/api/card/verify", [
+                    'pin'     => $this->pin_number,
+                    'user_id' => $this->user['id'] ?? null,
+                ]);
+
+            $this->pin_number = null; // never leave the PIN sitting in component state
+
+            if ($response->successful()) {
+                $this->pinVerifiedAt = now()->timestamp;
+
+                Flux::modal('verify-pin-modal')->close();
+                Flux::modal('confirm-queue-modal')->show();
+                return;
+            }
+
+            $this->pinError = $response->json('message') ?? 'Invalid PIN number.';
+
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error('Kiosk queue PIN check: connection failed', ['error' => $e->getMessage()]);
+            $this->pinError = 'Unable to connect to the server. Please try again.';
+        } catch (\Throwable $e) {
+            Log::error('Kiosk queue PIN check: unexpected error', ['error' => $e->getMessage()]);
+            $this->pinError = 'Something went wrong. Please try again or contact staff.';
+        }
+    }
+
     public function confirmQueue(): void
     {
         if (! $this->selectedVehicle || $this->isProcessing) {
+            return;
+        }
+
+        // PIN must have been verified within the last 2 minutes
+        if (! $this->pinVerifiedAt || now()->timestamp - $this->pinVerifiedAt > 120) {
+            $this->pinVerifiedAt = null;
+            Flux::modal('confirm-queue-modal')->close();
+            Flux::modal('verify-pin-modal')->show();
             return;
         }
 
@@ -118,6 +173,7 @@ new class extends Component
         $baseUrl = config('services.smarticct.api_url', 'https://smarticct.app');
 
         try {
+            
             $response = Http::withoutVerifying()
                 ->acceptJson()
                 ->timeout(8)
@@ -134,7 +190,7 @@ new class extends Component
 
             $result = $response->json();
 
-            if ($result['success'] === true) {
+            if (($result['success'] ?? false) === true) {
                 $newBalance = $result['balance_after'] ?? $this->balanceAfterDeduction;
                 $this->card['balance'] = $newBalance;
                 session(['kiosk_card' => $this->card]);
@@ -152,17 +208,13 @@ new class extends Component
                 ];
 
                 //Print
-                ThermalReceiptService::printKioskQueueSlip($receiptData);
+                // ThermalReceiptService::printKioskQueueSlip($receiptData);
 
                 Flux::toast(
                     duration: 5000,
                     variant: 'success',
                     heading: 'Queued Successfully',
-<<<<<<< HEAD
-                    text: ($result['message'] ?? 'Vehicle queued successfully.') . ' Please take your receipt!',
-=======
                     text: ($result['message'] ?? '') . " Please get your ticket!",
->>>>>>> e2c557227c53abf44dbcdbfe14b413488a08db6c
                 );
 
                 $this->redirect(route('menu.options'), navigate: true);
@@ -176,6 +228,7 @@ new class extends Component
             $this->errorMessage = 'Communication error with live server. Please try again.';
         } finally {
             $this->isProcessing = false;
+            $this->pinVerifiedAt = null; // one PIN check = one queue attempt
         }
     }
 };
@@ -347,7 +400,7 @@ new class extends Component
                 </div>
             @endif
 
-            <flux:modal.trigger name="confirm-queue-modal">
+            <flux:modal.trigger name="verify-pin-modal">
                 <flux:button
                     variant="primary"
                     class="kiosk-tap-target w-full !bg-secondary !font-bold !text-primary hover:!bg-secondary-hover"
@@ -358,6 +411,47 @@ new class extends Component
             </flux:modal.trigger>
         </flux:card>
     </div>
+
+    {{-- PIN Verification Modal: must pass before the confirmation modal opens --}}
+    <flux:modal name="verify-pin-modal" class="min-w-[24rem]">
+        <div class="space-y-6">
+            <div>
+                <flux:heading size="lg">Enter your PIN to continue</flux:heading>
+                <flux:text class="mt-2 text-sm text-light-txt-muted dark:text-dark-txt-muted">
+                    Enter the 6-digit PIN for your card to queue this vehicle.
+                </flux:text>
+            </div>
+
+            @if ($pinError)
+                <p class="font-secondary text-sm text-danger dark:text-dark-danger">{{ $pinError }}</p>
+            @endif
+
+            <flux:field>
+                <flux:input
+                    wire:model="pin_number"
+                    wire:keydown.enter="verifyPin"
+                    type="password"
+                    viewable
+                    maxlength="6"
+                    pattern="[0-9]*"
+                    inputmode="numeric"
+                    label="PIN"
+                />
+                <flux:error name="pin_number" />
+            </flux:field>
+
+            <div class="flex gap-2">
+                <flux:spacer />
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button variant="primary" wire:click="verifyPin" wire:loading.attr="disabled" wire:target="verifyPin">
+                    <span wire:loading.remove wire:target="verifyPin">Verify PIN</span>
+                    <span wire:loading wire:target="verifyPin">Verifying...</span>
+                </flux:button>
+            </div>
+        </div>
+    </flux:modal>
 
     {{-- Confirmation Modal --}}
     <flux:modal name="confirm-queue-modal" class="min-w-[24rem]">

@@ -1,11 +1,57 @@
 <?php
 
 use Livewire\Component;
+use Livewire\Attributes\Validate;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 new class extends Component
 {
     public array $card = [];
     public array $user = [];
+
+    #[Validate('required|digits:6')]
+    public ?string $pin_number = null;
+
+    public ?string $pinError = null;
+
+    public function verifyPin(): void
+    {
+        $this->pinError = null;
+        $this->validateOnly('pin_number');
+
+        $baseUrl = config('services.smarticct.api_url', 'https://smarticct.app');
+
+        try {
+            $response = Http::withoutVerifying()
+                ->acceptJson()
+                ->timeout(6)
+                ->post("{$baseUrl}/api/card/verify", [
+                    'pin'     => $this->pin_number,
+                    'user_id' => $this->user['id'] ?? null,
+                ]);
+
+            $this->pin_number = null; // never leave the PIN sitting in component state
+
+            if ($response->successful()) {
+                // Server-side session flag: the balance page checks this before showing anything.
+                session(['kiosk_pin_verified_at' => now()->timestamp]);
+
+                Flux::modal('verify-pin-modal')->close();
+                $this->redirect(route('view.balance'), navigate: true);
+                return;
+            }
+
+            $this->pinError = $response->json('message') ?? 'Invalid PIN number.';
+
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error('Kiosk balance PIN check: connection failed', ['error' => $e->getMessage()]);
+            $this->pinError = 'Unable to connect to the server. Please try again.';
+        } catch (\Throwable $e) {
+            Log::error('Kiosk balance PIN check: unexpected error', ['error' => $e->getMessage()]);
+            $this->pinError = 'Something went wrong. Please try again or contact staff.';
+        }
+    }
 
     public function mount()
     {
@@ -28,7 +74,7 @@ new class extends Component
 
     public function signOut(): void
     {
-        session()->forget(['kiosk_card', 'kiosk_user', 'kiosk_vehicle', 'kiosk_route_list', 'kiosk_verified_at']);
+        session()->forget(['kiosk_card', 'kiosk_user', 'kiosk_vehicle', 'kiosk_route_list', 'kiosk_verified_at', 'kiosk_pin_verified_at']);
         $this->redirect(route('kiosk.home'), navigate: true);
     }
 };
@@ -94,20 +140,19 @@ new class extends Component
                 Live Queue
             </flux:button>
 
-            <flux:button
-                href="{{ route('view.balance') }}"
-                wire:navigate
-                variant="ghost"
-                class="kiosk-tap-target !h-28 !flex-col !gap-2 !rounded-2xl !border !border-white/15 !bg-white/8 !text-sm !font-semibold !text-white !backdrop-blur-md transition hover:!border-white/25 hover:!bg-white/14 sm:!text-base"
-            >
-                <flux:icon name="credit-card" class="size-7 text-secondary sm:size-8" />
-                Check Card Balance
-            </flux:button>
+            <flux:modal.trigger name="verify-pin-modal">
+                <flux:button
+                    variant="ghost"
+                    class="kiosk-tap-target !h-28 !flex-col !gap-2 !rounded-2xl !border !border-white/15 !bg-white/8 !text-sm !font-semibold !text-white !backdrop-blur-md transition hover:!border-white/25 hover:!bg-white/14 sm:!text-base"
+                >
+                    <flux:icon name="credit-card" class="size-7 text-secondary sm:size-8" />
+                    Check Card Balance
+                </flux:button>
+            </flux:modal.trigger>
+
+
         </div>
 
-        {{-- Sign out — still the quietest action on the screen, but a proper
-             bordered pill with breathing room instead of a squashed inline
-             text link. --}}
         <div class="flex justify-center">
             <flux:button
                 wire:click="signOut"
@@ -122,4 +167,46 @@ new class extends Component
         </div>
 
     </div>
+
+
+    {{-- PIN Verification Modal: gates access to the balance screen --}}
+    <flux:modal name="verify-pin-modal" class="min-w-[24rem]">
+        <div class="space-y-6">
+            <div>
+                <flux:heading size="lg">Enter your PIN to continue</flux:heading>
+                <flux:text class="mt-2 text-sm text-light-txt-muted dark:text-dark-txt-muted">
+                    Enter the 6-digit PIN for your card to view your balance.
+                </flux:text>
+            </div>
+
+            @if ($pinError)
+                <p class="font-secondary text-sm text-danger dark:text-dark-danger">{{ $pinError }}</p>
+            @endif
+
+            <flux:field>
+                <flux:input
+                    wire:model="pin_number"
+                    wire:keydown.enter="verifyPin"
+                    type="password"
+                    viewable
+                    maxlength="6"
+                    pattern="[0-9]*"
+                    inputmode="numeric"
+                    label="PIN"
+                />
+                <flux:error name="pin_number" />
+            </flux:field>
+
+            <div class="flex gap-2">
+                <flux:spacer />
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button variant="primary" wire:click="verifyPin" wire:loading.attr="disabled" wire:target="verifyPin">
+                    <span wire:loading.remove wire:target="verifyPin">Verify PIN</span>
+                    <span wire:loading wire:target="verifyPin">Verifying...</span>
+                </flux:button>
+            </div>
+        </div>
+    </flux:modal>
 </div>

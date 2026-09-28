@@ -14,6 +14,15 @@ new class extends Component
             return;
         }
 
+        // Balance is only visible after a recent, successful PIN check on the menu screen.
+        $verifiedAt = session('kiosk_pin_verified_at');
+
+        if (! $verifiedAt || now()->timestamp - $verifiedAt > 120) {
+            session()->forget('kiosk_pin_verified_at');
+            $this->redirect(route('menu.options'), navigate: true);
+            return;
+        }
+
         $this->card = session('kiosk_card', []);
         $this->user = session('kiosk_user', []);
     }
