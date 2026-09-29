@@ -65,91 +65,71 @@ new class extends Component
 };
 ?>
 
-<div class="flex min-h-full w-full flex-1 items-center justify-center p-4 select-none sm:p-6">
-    <flux:card class="w-full max-w-lg space-y-7 !rounded-3xl !border !border-white/15 !bg-white/8 !p-7 !backdrop-blur-md sm:!p-9">
+{{-- Plain inputs: the device's own keyboard is used, as before. Everything the person
+     needs (both fields, Back, Sign in) sits in the top half of the screen so an OS
+     keyboard opening below never covers a button. --}}
+<div class="flex min-h-0 flex-1 flex-col items-center justify-center px-8 pb-16">
+  <div class="w-full max-w-[820px]">
+    <h1 class="font-primary text-[38px] font-extrabold leading-tight text-white">Sign in with your account</h1>
+    <p class="mt-1 font-secondary text-xl text-tx-2">Use the email and password from your SmartICCT account.</p>
 
-        <div class="space-y-1.5 text-center">
-            <flux:heading size="xl" class="font-primary text-3xl font-extrabold text-white drop-shadow-sm sm:text-4xl">
-                Use Account
-            </flux:heading>
-            <flux:text class="font-secondary text-sm text-white/60">
-                Enter your registered SmartICCT credentials
-            </flux:text>
+    @if ($errorMessage)
+        <div class="mt-3 flex items-center gap-3 rounded-2xl border-2 border-stop/50 bg-stop/10 px-5 py-3 text-xl font-semibold text-stop">
+            <flux:icon name="exclamation-circle" class="size-7 shrink-0" />
+            {{ $errorMessage }}
         </div>
+    @endif
 
-        @if ($errorMessage)
-            <div class="rounded-xl border border-danger/30 bg-danger/10 p-3 text-center text-sm font-medium text-danger">
-                {{ $errorMessage }}
-            </div>
-        @endif
-
-        {{-- Plain inputs, built by hand — icon and text share one flex row inside
-             one bordered box, so there's exactly one visible field per input
-             instead of Flux's icon-wrapper and input background layering into
-             two mismatched boxes. --}}
-        <form wire:submit="login" class="space-y-5">
-            <div class="space-y-1.5">
-                <label class="block font-secondary text-sm font-semibold text-white/70">Email Address</label>
-                <div class="flex items-center gap-3 rounded-2xl border border-white/15 bg-white/8 px-4 focus-within:border-secondary/60">
-                    <flux:icon name="envelope" class="size-4 shrink-0 text-white/40" />
+    <form wire:submit="login" class="mt-4 space-y-4">
+        <div class="grid grid-cols-[1.25fr_1fr] gap-5">
+            <div>
+                <label for="login-email" class="mb-2 block font-secondary text-lg font-semibold text-tx-2">Email address</label>
+                <div class="flex h-[68px] items-center gap-3 rounded-[1.125rem] border-2 border-white/30 bg-k-800 px-5 focus-within:border-secondary focus-within:ring-[3px] focus-within:ring-secondary/30">
+                    <flux:icon name="envelope" class="size-6 shrink-0 text-tx-3" />
                     <input
+                        id="login-email"
                         type="email"
                         wire:model.defer="email_address"
-                        placeholder="Enter your email"
+                        placeholder="name@example.com"
                         autofocus
                         required
-                        class="h-11 w-full bg-transparent font-secondary text-base text-white placeholder:text-white/40 focus:outline-none"
+                        class="h-full w-full bg-transparent font-secondary text-[26px] text-white placeholder:text-tx-3 focus:outline-none [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_var(--color-k-800)] [&:-webkit-autofill]:[-webkit-text-fill-color:#fff]"
                     >
                 </div>
                 @error('email_address') <flux:error>{{ $message }}</flux:error> @enderror
             </div>
 
-            <div class="space-y-1.5">
-                <label class="block font-secondary text-sm font-semibold text-white/70">Password</label>
-                <div class="flex items-center gap-3 rounded-2xl border border-white/15 bg-white/8 px-4 focus-within:border-secondary/60">
-                    <flux:icon name="key" class="size-4 shrink-0 text-white/40" />
+            <div>
+                <label for="login-password" class="mb-2 block font-secondary text-lg font-semibold text-tx-2">Password</label>
+                <div class="flex h-[68px] items-center gap-3 rounded-[1.125rem] border-2 border-white/30 bg-k-800 px-5 focus-within:border-secondary focus-within:ring-[3px] focus-within:ring-secondary/30">
+                    <flux:icon name="key" class="size-6 shrink-0 text-tx-3" />
                     <input
+                        id="login-password"
                         type="{{ $showPassword ? 'text' : 'password' }}"
                         wire:model.defer="password"
-                        placeholder="Enter your password"
+                        placeholder="Password"
                         required
-                        class="h-11 w-full bg-transparent font-secondary text-base text-white placeholder:text-white/40 focus:outline-none"
+                        class="h-full w-full min-w-0 bg-transparent font-secondary text-[26px] text-white placeholder:text-tx-3 focus:outline-none [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_var(--color-k-800)] [&:-webkit-autofill]:[-webkit-text-fill-color:#fff]"
                     >
-                    <button type="button" wire:click="togglePassword" class="shrink-0 text-white/40 hover:text-white/70">
-                        <flux:icon name="{{ $showPassword ? 'eye-slash' : 'eye' }}" class="size-5" />
+                    <button type="button" wire:click="togglePassword" class="shrink-0 px-1 text-lg font-bold text-tx-2">
+                        {{ $showPassword ? 'Hide' : 'Show' }}
                     </button>
                 </div>
                 @error('password') <flux:error>{{ $message }}</flux:error> @enderror
             </div>
-
-            <div class="pt-1">
-                <flux:button
-                    type="submit"
-                    variant="primary"
-                    class="kiosk-tap-target !h-16 w-full !rounded-2xl !bg-secondary !text-xl !font-bold !text-primary !shadow-lg !shadow-secondary/25 transition hover:!bg-secondary-hover"
-                    wire:loading.attr="disabled"
-                >
-                    <span wire:loading.remove wire:target="login">Sign In</span>
-                    <span wire:loading wire:target="login" class="inline-flex items-center gap-2">
-                        <flux:icon name="arrow-path" class="size-5 animate-spin" />
-                        Authenticating...
-                    </span>
-                </flux:button>
-            </div>
-        </form>
-
-        <div class="text-center">
-            <flux:button
-                href="{{ route('login.options') }}"
-                wire:navigate
-                variant="ghost"
-                class="!h-12 !rounded-xl !border !border-white/10 !px-6 !text-sm !font-semibold !text-white/70 transition hover:!bg-white/10 hover:!text-white"
-            >
-                <span class="inline-flex items-center gap-2">
-                    <flux:icon name="arrow-left" class="size-4" />
-                    Back
-                </span>
-            </flux:button>
         </div>
-    </flux:card>
+
+        <div class="flex gap-4">
+            <x-kiosk.button variant="second" size="xl" class="w-[210px]" href="{{ route('kiosk.home') }}" wire:navigate>
+                <flux:icon name="arrow-left" class="size-7" /> Back
+            </x-kiosk.button>
+            <x-kiosk.button size="xl" class="flex-1" type="submit" wire:loading.attr="disabled" wire:target="login">
+                <span wire:loading.remove wire:target="login">Sign in</span>
+                <span wire:loading.inline-flex wire:target="login" class="items-center gap-3">
+                    <flux:icon name="arrow-path" class="size-7 animate-spin" /> Signing in...
+                </span>
+            </x-kiosk.button>
+        </div>
+    </form>
 </div>
+  </div>
