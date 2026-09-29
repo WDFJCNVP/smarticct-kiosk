@@ -118,13 +118,29 @@ new class extends Component
         }
     }
 
+    public function startPaymentFlow(): void
+    {
+        if (! $this->selectedVehicle || ! session()->has('kiosk_card')) {
+            return;
+        }
+
+        // If PIN is missing or expired (> 2 mins), prompt for PIN first
+        if (! $this->pinVerifiedAt || now()->timestamp - $this->pinVerifiedAt > 120) {
+            $this->pinVerifiedAt = null;
+            Flux::modal('verify-pin-modal')->show();
+            return;
+        }
+
+        // Otherwise show the confirmation modal
+        Flux::modal('confirm-ride')->show();
+}
+
     public function confirmPayment(): void
     {
         if (! $this->selectedVehicle || ! session()->has('kiosk_card')) {
             return;
         }
 
-        // PIN must have been verified within the last 2 minutes
         if (! $this->pinVerifiedAt || now()->timestamp - $this->pinVerifiedAt > 120) {
             $this->pinVerifiedAt = null;
             Flux::modal('confirm-ride')->close();
@@ -132,7 +148,6 @@ new class extends Component
             return;
         }
 
-        // Consume the verification: one PIN check = one payment attempt
         $this->pinVerifiedAt = null;
 
         $card = session('kiosk_card');
@@ -153,7 +168,6 @@ new class extends Component
             $result = $response->json();
 
             if (($result['success'] ?? false) === true) {
-
                 $newBalance = $result['balance_after'] ?? max(0, (float)($card['balance'] ?? 0) - (float)$this->selectedVehicle['fare']);
                 
                 $card['balance'] = $newBalance;
@@ -170,7 +184,6 @@ new class extends Component
                     'fare'           => (float) $this->selectedVehicle['fare']
                 ];
 
-                // Print
                 ThermalReceiptService::printCommuterFareSlip($receiptData);
 
                 session()->flash('kiosk_done', [
@@ -180,26 +193,25 @@ new class extends Component
 
                 $this->redirect(route('menu.options'), navigate: true);
                 return;
-            } else {
-                Flux::toast(
-                    duration: 5000,
-                    variant: 'warning',
-                    heading: 'Payment Denied',
-                    text: $result['message'] ?? 'Unable to process fare payment.',
-                );
             }
 
+            Flux::modal('confirm-ride')->close();
             Flux::toast(
                 duration: 5000,
                 variant: 'warning',
-                heading: 'Payment Not Completed',
-                text: $result['message'] ?? 'Payment failed.',
+                heading: 'Payment Denied',
+                text: $result['message'] ?? 'Unable to process fare payment.',
             );
 
-            $this->dispatch('payment-failed', message: $result['message'] ?? 'Payment failed.');
         } catch (\Exception $e) {
             Log::error('Commuter fare print/payment error', ['error' => $e->getMessage()]);
-            $this->dispatch('payment-failed', message: 'Could not connect to payment processor.');
+            Flux::modal('confirm-ride')->close();
+            Flux::toast(
+                duration: 5000,
+                variant: 'danger',
+                heading: 'Error',
+                text: 'Could not connect to payment processor.',
+            );
         }
     }
 };
@@ -350,7 +362,7 @@ new class extends Component
 
         <x-slot:primary>
             @if ($this->selectedVehicle)
-                <x-kiosk.button wire:key="pay-cta" size="xl" class="w-[290px]" @click="confirming = true">
+                <x-kiosk.button wire:key="pay-cta" size="xl" class="w-[290px]" wire:click="startPaymentFlow">
                     Pay ₱{{ number_format($this->selectedVehicle['fare'], 2) }}
                 </x-kiosk.button>
             @else
@@ -359,7 +371,7 @@ new class extends Component
         </x-slot:primary>
     </x-kiosk.action-bar>
 
-    {{-- PIN Verification Modal: required by backend verifyPin() --}}
+    {{-- PIN Verification Modal --}}
     <flux:modal name="verify-pin-modal" class="min-w-[24rem]">
         <div class="space-y-6">
             <div>
@@ -400,39 +412,45 @@ new class extends Component
         </div>
     </flux:modal>
 
-    {{-- Confirmation Modal: merged with new kiosk UI design --}}
-    <flux:modal name="confirm-ride" class="min-w-[28rem]">
+    {{-- Confirmation Modal --}}
+{{-- Confirmation Modal --}}
+    <flux:modal name="confirm-ride" class="w-[680px] max-w-[90vw] !bg-k-800 !border-2 !border-white/30 !rounded-[2rem] !p-8 shadow-2xl">
         @if ($this->selectedVehicle)
-            <div x-show="confirming" x-cloak class="fixed inset-0 z-40 flex items-center justify-center bg-k-950/80 p-6">
-                <div class="w-[700px] rounded-[2rem] border-2 border-white/30 bg-k-800 p-9 shadow-2xl">
-                    <h2 class="font-primary text-[34px] font-extrabold leading-tight text-white">Confirm your payment</h2>
+            <div class="space-y-6">
+                <h2 class="font-primary text-[34px] font-extrabold leading-tight text-white">Confirm your payment</h2>
 
-                    <div class="mb-3 mt-4 flex items-center gap-3">
-                        <flux:icon name="map-pin" class="size-8 text-secondary" />
-                        <span class="font-primary text-[32px] font-extrabold text-white">Iriga → {{ $this->selectedRoute }}</span>
+                <div class="flex items-center gap-3">
+                    <flux:icon name="map-pin" class="size-8 text-secondary" />
+                    <span class="font-primary text-[32px] font-extrabold text-white">Iriga → {{ $this->selectedRoute }}</span>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <x-kiosk.plate>{{ $this->selectedVehicle['plate_number'] ?? '—' }}</x-kiosk.plate>
+                    <x-kiosk.vehicle-type :type="$this->selectedVehicle['type']" />
+                </div>
+
+                <dl class="divide-y divide-white/15 text-[22px]">
+                    <div class="flex items-center justify-between py-3">
+                        <dt class="text-tx-2">Total fare</dt>
+                        <dd class="font-primary text-[38px] font-extrabold text-secondary tabular-nums">₱{{ number_format($this->selectedVehicle['fare'], 2) }}</dd>
                     </div>
-                    <div class="mb-3 flex items-center gap-3">
-                        <x-kiosk.plate>{{ $this->selectedVehicle['plate_number'] ?? '—' }}</x-kiosk.plate>
-                        <x-kiosk.vehicle-type :type="$this->selectedVehicle['type']" />
-                    </div>
+                </dl>
 
-                    <dl class="divide-y divide-white/15 text-[22px]">
-                        <div class="flex items-center justify-between py-3">
-                            <dt class="text-tx-2">Total fare</dt>
-                            <dd class="font-primary text-[38px] font-extrabold text-secondary tabular-nums">₱{{ number_format($this->selectedVehicle['fare'], 2) }}</dd>
-                        </div>
-                    </dl>
-                    <p class="mt-2 font-secondary text-xl text-tx-3">This amount will be deducted from your card.</p>
+                <p class="font-secondary text-xl text-tx-3">This amount will be deducted from your card.</p>
 
-                    <div class="mt-6 flex gap-4">
-                        <x-kiosk.button variant="second" size="xl" class="w-[210px]" @click="confirming = false" wire:loading.attr="disabled" wire:target="confirmPayment">Cancel</x-kiosk.button>
-                        <x-kiosk.button size="xl" class="flex-1" wire:click="confirmPayment" wire:loading.attr="disabled" wire:target="confirmPayment">
-                            <span wire:loading.remove wire:target="confirmPayment">Confirm payment</span>
-                            <span wire:loading.inline-flex wire:target="confirmPayment" class="items-center gap-3">
-                                <flux:icon name="arrow-path" class="size-7 animate-spin" /> Processing…
-                            </span>
+                <div class="flex items-center gap-4 pt-2">
+                    <flux:modal.close class="w-[210px]">
+                        <x-kiosk.button variant="second" size="xl" class="w-full" wire:loading.attr="disabled" wire:target="confirmPayment">
+                            Cancel
                         </x-kiosk.button>
-                    </div>
+                    </flux:modal.close>
+
+                    <x-kiosk.button size="xl" class="flex-1" wire:click="confirmPayment" wire:loading.attr="disabled" wire:target="confirmPayment">
+                        <span wire:loading.remove wire:target="confirmPayment">Confirm payment</span>
+                        <span wire:loading.inline-flex wire:target="confirmPayment" class="items-center gap-3">
+                            <flux:icon name="arrow-path" class="size-7 animate-spin" /> Processing…
+                        </span>
+                    </x-kiosk.button>
                 </div>
             </div>
         @endif

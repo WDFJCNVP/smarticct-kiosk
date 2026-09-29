@@ -101,6 +101,30 @@ new class extends Component
         $this->redirect(route('menu.options'), navigate: true);
     }
 
+    public function startQueueFlow(): void
+    {
+        if (! $this->selectedVehicle) {
+            return;
+        }
+
+        $this->driverNameError = null;
+        $trimmedDriverName = trim($this->driverName);
+
+        if ($trimmedDriverName === '') {
+            $this->driverNameError = 'Enter the name of the driver taking this trip.';
+            return;
+        }
+
+        // Check if PIN verification is missing or expired (> 2 mins)
+        if (! $this->pinVerifiedAt || now()->timestamp - $this->pinVerifiedAt > 120) {
+            $this->pinVerifiedAt = null;
+            Flux::modal('verify-pin-modal')->show();
+            return;
+        }
+
+        Flux::modal('confirm-queue-modal')->show();
+    }
+
     public function verifyPin(): void
     {
         $this->pinError = null;
@@ -399,7 +423,7 @@ new class extends Component
 
         <x-slot:primary>
             @if ($canQueue)
-                <x-kiosk.button wire:key="q-cta-go" size="xl" class="w-[290px]" x-show="hasName()" @click="confirming = true">Queue vehicle</x-kiosk.button>
+                <x-kiosk.button wire:key="q-cta-go" size="xl" class="w-[290px]" x-show="hasName()" wire:click="startQueueFlow">Queue vehicle</x-kiosk.button>
                 <x-kiosk.button wire:key="q-cta-name" variant="off" size="xl" class="w-[290px]" x-show="!hasName()" x-cloak @click="document.getElementById('driver-name')?.focus()">Add driver name</x-kiosk.button>
             @else
                 <x-kiosk.button wire:key="q-cta-off" variant="off" size="xl" class="w-[290px]" disabled>{{ $this->selectedVehicle ? 'Not enough balance' : 'Choose a vehicle' }}</x-kiosk.button>
@@ -407,29 +431,75 @@ new class extends Component
         </x-slot:primary>
     </x-kiosk.action-bar>
 
-    {{-- Confirm queue entry --}}
-    @if ($this->selectedVehicle)
-        <div x-show="confirming" x-cloak class="fixed inset-0 z-40 flex items-center justify-center bg-k-950/80 p-6">
-            <div class="w-[700px] rounded-[2rem] border-2 border-white/30 bg-k-800 p-9 shadow-2xl">
-                <h2 class="font-primary text-[34px] font-extrabold leading-tight text-white">Queue this vehicle?</h2>
-                <p class="mt-2 font-secondary text-xl text-tx-2">Please verify the vehicle and driver. The queueing fee will be deducted from your card.</p>
+    {{-- PIN Verification Modal --}}
+    <flux:modal name="verify-pin-modal" class="min-w-[24rem]">
+        <div class="space-y-6">
+            <div>
+                <flux:heading size="lg">Enter your PIN to continue</flux:heading>
+                <flux:text class="mt-2 text-sm text-light-txt-muted dark:text-dark-txt-muted">
+                    Enter the 6-digit PIN for your card to queue this vehicle.
+                </flux:text>
+            </div>
 
-                <div class="mb-2 mt-4 flex items-center gap-3">
+            @if ($pinError)
+                <p class="font-secondary text-sm text-danger dark:text-dark-danger">{{ $pinError }}</p>
+            @endif
+
+            <flux:field>
+                <flux:input
+                    wire:model="pin_number"
+                    wire:keydown.enter="verifyPin"
+                    type="password"
+                    viewable
+                    maxlength="6"
+                    pattern="[0-9]*"
+                    inputmode="numeric"
+                    label="PIN"
+                />
+                <flux:error name="pin_number" />
+            </flux:field>
+
+            <div class="flex gap-2">
+                <flux:spacer />
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button variant="primary" wire:click="verifyPin" wire:loading.attr="disabled" wire:target="verifyPin">
+                    <span wire:loading.remove wire:target="verifyPin">Verify PIN</span>
+                    <span wire:loading wire:target="verifyPin">Verifying...</span>
+                </flux:button>
+            </div>
+        </div>
+    </flux:modal>
+
+    {{-- Confirm Queue Entry Modal --}}
+    <flux:modal name="confirm-queue-modal" class="w-[680px] max-w-[90vw] !bg-k-800 !border-2 !border-white/30 !rounded-[2rem] !p-8 shadow-2xl">
+        @if ($this->selectedVehicle)
+            <div class="space-y-6">
+                <div>
+                    <h2 class="font-primary text-[34px] font-extrabold leading-tight text-white">Queue this vehicle?</h2>
+                    <p class="mt-2 font-secondary text-xl text-tx-2">Please verify the vehicle and driver. The queueing fee will be deducted from your card.</p>
+                </div>
+
+                <div class="flex items-center gap-3">
                     <flux:icon name="map-pin" class="size-8 text-secondary" />
                     <span class="font-primary text-[32px] font-extrabold text-white">Iriga → {{ $this->selectedVehicle['destination'] ?? 'N/A' }}</span>
                 </div>
-                <div class="mb-3 flex items-center gap-3">
+
+                <div class="flex items-center gap-3">
                     <x-kiosk.plate>{{ $this->selectedVehicle['plate_number'] }}</x-kiosk.plate>
                     <x-kiosk.vehicle-type :type="$this->selectedVehicle['vehicle_type']" />
                 </div>
 
                 <dl class="divide-y divide-white/15 text-[22px]">
-                    <div class="flex items-center justify-between gap-4 py-3"><dt class="text-tx-2">Driver on duty</dt><dd class="truncate font-bold text-white" x-text="$wire.driverName || '—'">—</dd></div>
+                    <div class="flex items-center justify-between gap-4 py-3"><dt class="text-tx-2">Driver on duty</dt><dd class="truncate font-bold text-white">{{ $driverName ?: '—' }}</dd></div>
                     <div class="flex items-center justify-between gap-4 py-3"><dt class="text-tx-2">Queueing fee</dt><dd class="font-primary text-[38px] font-extrabold text-secondary tabular-nums">₱{{ number_format($selectedFee, 2) }}</dd></div>
                 </dl>
 
-                <div class="mt-6 flex gap-4">
-                    <x-kiosk.button variant="second" size="xl" class="w-[210px]" @click="confirming = false" wire:loading.attr="disabled" wire:target="confirmQueue">Cancel</x-kiosk.button>
+                <div class="flex items-center gap-4 pt-2">
+                    <flux:modal.close class="w-[210px]">
+                        <x-kiosk.button variant="second" size="xl" class="w-full" wire:loading.attr="disabled" wire:target="confirmQueue">Cancel</x-kiosk.button>
+                    </flux:modal.close>
                     <x-kiosk.button size="xl" class="flex-1" wire:click="confirmQueue" wire:loading.attr="disabled" wire:target="confirmQueue">
                         <span wire:loading.remove wire:target="confirmQueue">Confirm &amp; deduct fee</span>
                         <span wire:loading.inline-flex wire:target="confirmQueue" class="items-center gap-3">
@@ -438,6 +508,7 @@ new class extends Component
                     </x-kiosk.button>
                 </div>
             </div>
-        </div>
-    @endif
+        @endif
+    </flux:modal>
+</div>
 </div>
