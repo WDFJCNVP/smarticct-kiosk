@@ -1,56 +1,28 @@
 <?php
 
+use App\Concerns\VerifiesKioskPin;
 use Livewire\Component;
-use Livewire\Attributes\Validate;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 
 new class extends Component
 {
+    use VerifiesKioskPin;
+
     public array $card = [];
     public array $user = [];
     public ?array $done = null;
 
-    #[Validate('required|digits:6')]
-    public ?string $pin_number = null;
-
-    public ?string $pinError = null;
-
-    public function verifyPin(): void
+    public function verifyPin(string $pin): bool
     {
-        $this->pinError = null;
-        $this->validateOnly('pin_number');
-
-        $baseUrl = config('services.smarticct.api_url', 'https://smarticct.app');
-
-        try {
-            $response = Http::withoutVerifying()
-                ->acceptJson()
-                ->timeout(6)
-                ->post("{$baseUrl}/api/card/verify", [
-                    'pin'     => $this->pin_number,
-                    'user_id' => $this->user['id'] ?? null,
-                ]);
-
-            $this->pin_number = null; 
-
-            if ($response->successful()) {
-                session(['kiosk_pin_verified_at' => now()->timestamp]);
-
-                Flux::modal('verify-pin-modal')->close();
-                $this->redirect(route('view.balance'), navigate: true);
-                return;
-            }
-
-            $this->pinError = $response->json('message') ?? 'Invalid PIN number.';
-
-        } catch (\Illuminate\Http\Client\ConnectionException $e) {
-            Log::error('Kiosk balance PIN check: connection failed', ['error' => $e->getMessage()]);
-            $this->pinError = 'Unable to connect to the server. Please try again.';
-        } catch (\Throwable $e) {
-            Log::error('Kiosk balance PIN check: unexpected error', ['error' => $e->getMessage()]);
-            $this->pinError = 'Something went wrong. Please try again or contact staff.';
+        if (! $this->attemptPin($pin)) {
+            return false;
         }
+
+        session(['kiosk_pin_verified_at' => now()->timestamp]);
+
+        Flux::modal('verify-pin-modal')->close();
+        $this->redirect(route('view.balance'), navigate: true);
+
+        return true;
     }
 
     public function mount()
@@ -63,6 +35,7 @@ new class extends Component
         $this->card = session('kiosk_card', []);
         $this->user = session('kiosk_user', []);
         $this->done = session('kiosk_done');
+        $this->refreshPinLock();
 
         if (session('queue_success')) {
             Flux::toast(
@@ -71,6 +44,12 @@ new class extends Component
                 text: 'Your vehicle has been successfully queued',
             );
         }
+    }
+
+    // Leave the receipt screen and show the normal menu; the person stays signed in.
+    public function dismissDone(): void
+    {
+        $this->done = null;
     }
 
     public function signOut(): void
@@ -84,6 +63,7 @@ new class extends Component
 @php
     $isOperator = ($user['role'] ?? '') === 'operator';
     $firstName  = \Illuminate\Support\Str::of($user['name'] ?? 'Cardholder')->before(' ');
+    $tile = 'kiosk-tap-target flex h-[150px] w-full flex-col items-start justify-between rounded-3xl border-2 border-white/30 bg-k-800 p-6 text-left transition hover:bg-k-700';
 @endphp
 
 <div class="flex min-h-0 flex-1 flex-col">
@@ -101,104 +81,52 @@ new class extends Component
                 </span>
             </div>
 
-            {{-- Hero action --}}
-            <flux:button
+            {{-- Hero action: whatever this person came to do --}}
+            <a
                 href="{{ $isOperator ? route('queue.vehicle') : route('route.select') }}"
                 wire:navigate
-                variant="primary"
-                class="kiosk-tap-target !h-40 w-full !flex-col !gap-3 !rounded-3xl !bg-secondary !text-2xl !font-bold !text-primary !shadow-lg !shadow-secondary/25 transition hover:!bg-secondary-hover sm:!h-44 sm:!text-3xl"
+                class="kiosk-tap-target flex h-[250px] flex-col items-start justify-between rounded-[1.75rem] bg-secondary p-8 text-left text-primary shadow-[0_10px_0_rgba(0,0,0,.3)] transition hover:bg-secondary-hover"
             >
-                <flux:icon name="{{ $isOperator ? 'truck' : 'ticket' }}" class="size-14" />
-                {{ $isOperator ? 'Queue Vehicle' : 'Pay Fare' }}
-            </flux:button>
+                <flux:icon name="{{ $isOperator ? 'truck' : 'ticket' }}" class="size-16" />
+                <div>
+                    <div class="font-primary text-5xl font-extrabold leading-tight tracking-tight">{{ $isOperator ? 'Queue a vehicle' : 'Pay fare' }}</div>
+                    <div class="mt-1 font-secondary text-2xl font-medium text-primary/85">
+                        {{ $isOperator ? 'Pick a vehicle and pay the queue fee' : 'Pick a destination and pay from your card' }}
+                    </div>
+                </div>
+            </a>
 
-            {{-- Secondary actions --}}
-            <div class="grid grid-cols-3 gap-3 sm:gap-4">
-                <flux:button
-                    href="{{ route('view.routes') }}"
-                    wire:navigate
-                    variant="ghost"
-                    class="kiosk-tap-target !h-28 !flex-col !gap-2 !rounded-2xl !border !border-white/15 !bg-white/8 !text-sm !font-semibold !text-white !backdrop-blur-md transition hover:!border-white/25 hover:!bg-white/14 sm:!text-base"
-                >
-                    <flux:icon name="map" class="size-7 text-secondary sm:size-8" />
-                    Routes &amp; Fares
-                </flux:button>
+            <div class="grid grid-cols-3 gap-5">
+                <a href="{{ route('view.routes') }}" wire:navigate class="{{ $tile }}">
+                    <flux:icon name="map" class="size-10 text-secondary" />
+                    <div>
+                        <div class="font-primary text-2xl font-extrabold text-white">Routes &amp; fares</div>
+                        <div class="font-secondary text-lg text-tx-3">All destinations</div>
+                    </div>
+                </a>
 
-                <flux:button
-                    href="{{ route('guest.queue') }}"
-                    wire:navigate
-                    variant="ghost"
-                    class="kiosk-tap-target !h-28 !flex-col !gap-2 !rounded-2xl !border !border-white/15 !bg-white/8 !text-sm !font-semibold !text-white !backdrop-blur-md transition hover:!border-white/25 hover:!bg-white/14 sm:!text-base"
-                >
-                    <flux:icon name="queue-list" class="size-7 text-secondary sm:size-8" />
-                    Live Queue
-                </flux:button>
+                <a href="{{ route('guest.queue') }}" wire:navigate class="{{ $tile }}">
+                    <flux:icon name="queue-list" class="size-10 text-secondary" />
+                    <div>
+                        <div class="font-primary text-2xl font-extrabold text-white">Live queue</div>
+                        <div class="font-secondary text-lg text-tx-3">What's boarding now</div>
+                    </div>
+                </a>
 
+                {{-- "My card" is PIN-protected: the tile opens the PIN modal below, and the balance
+                     page only opens after a successful check. --}}
                 <flux:modal.trigger name="verify-pin-modal">
-                    <flux:button
-                        variant="ghost"
-                        class="kiosk-tap-target !h-28 !flex-col !gap-2 !rounded-2xl !border !border-white/15 !bg-white/8 !text-sm !font-semibold !text-white !backdrop-blur-md transition hover:!border-white/25 hover:!bg-white/14 sm:!text-base"
-                    >
-                        <flux:icon name="credit-card" class="size-7 text-secondary sm:size-8" />
-                        Check Card Balance
-                    </flux:button>
+                    <button type="button" class="{{ $tile }}">
+                        <flux:icon name="credit-card" class="size-10 text-secondary" />
+                        <div>
+                            <div class="font-primary text-2xl font-extrabold text-white">My card</div>
+                            <div class="font-secondary text-lg text-tx-3">PIN required</div>
+                        </div>
+                    </button>
                 </flux:modal.trigger>
             </div>
-
-            <div class="flex justify-center">
-                <flux:button
-                    wire:click="signOut"
-                    variant="ghost"
-                    class="!h-14 !w-full !max-w-xs !rounded-2xl !border !border-white/10 !bg-white/5 !text-base !font-semibold !text-white/70 transition hover:!border-danger/30 hover:!bg-danger/10 hover:!text-danger"
-                >
-                    <span class="inline-flex items-center gap-2">
-                        <flux:icon name="arrow-right-start-on-rectangle" class="size-5" />
-                        Sign Out
-                    </span>
-                </flux:button>
-            </div>
-
         </div>
 
-        {{-- PIN Verification Modal --}}
-        <flux:modal name="verify-pin-modal" class="min-w-[24rem]">
-            <div class="space-y-6">
-                <div>
-                    <flux:heading size="lg">Enter your PIN to continue</flux:heading>
-                    <flux:text class="mt-2 text-sm text-light-txt-muted dark:text-dark-txt-muted">
-                        Enter the 6-digit PIN for your card to view your balance.
-                    </flux:text>
-                </div>
-
-                @if ($pinError)
-                    <p class="font-secondary text-sm text-danger dark:text-dark-danger">{{ $pinError }}</p>
-                @endif
-
-                <flux:field>
-                    <flux:input
-                        wire:model="pin_number"
-                        wire:keydown.enter="verifyPin"
-                        type="password"
-                        viewable
-                        maxlength="6"
-                        pattern="[0-9]*"
-                        inputmode="numeric"
-                        label="PIN"
-                    />
-                    <flux:error name="pin_number" />
-                </flux:field>
-
-                <div class="flex gap-2">
-                    <flux:spacer />
-                    <flux:modal.close>
-                        <flux:button variant="ghost">Cancel</flux:button>
-                    </flux:modal.close>
-                    <flux:button variant="primary" wire:click="verifyPin" wire:loading.attr="disabled" wire:target="verifyPin">
-                        <span wire:loading.remove wire:target="verifyPin">Verify PIN</span>
-                        <span wire:loading wire:target="verifyPin">Verifying...</span>
-                    </flux:button>
-                </div>
-            </div>
-        </flux:modal>
+        <x-kiosk.pin-modal subtitle="Enter the 6-digit PIN for your card to view your balance." />
     @endif
 </div>

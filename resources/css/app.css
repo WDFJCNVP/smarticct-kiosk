@@ -156,10 +156,8 @@ input, textarea, [contenteditable="true"] {
 }
 @keyframes kiosk-print { to { transform: translateY(0); } }
 
-@media (prefers-reduced-motion: reduce) {
-    .kiosk-ring, .kiosk-pop, .kiosk-shrink { animation: none; }
-    .kiosk-ticket { animation: none; transform: none; }
-}
+/* NOTE: deliberately no prefers-reduced-motion override here. This is a fixed kiosk terminal;
+   with the OS "animations off" setting the receipt slide-out / success pop silently never ran. */
 
 :root { --k-scale: 0.9; }
 
@@ -172,4 +170,22 @@ input, textarea, [contenteditable="true"] {
     transform: scale(var(--k-scale));
     transform-origin: 0 0;
     overflow: hidden;
+}
+
+/* PIN pad: circles shake on a wrong PIN */
+.kiosk-shake { animation: kiosk-shake .4s ease-in-out; }
+@keyframes kiosk-shake {
+    0%, 100% { transform: translateX(0); }
+    20%      { transform: translateX(-12px); }
+    40%      { transform: translateX(10px); }
+    60%      { transform: translateX(-8px); }
+    80%      { transform: translateX(6px); }
+}
+
+
+/* PIN screen: dim (and soften) everything behind the prompt */
+dialog[data-modal="verify-pin-modal"]::backdrop {
+    background: rgb(4 6 24 / .9) !important;
+    -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px);
 }

@@ -1,24 +1,21 @@
 <?php
 
+use App\Concerns\VerifiesKioskPin;
 use Livewire\Component;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
-use Livewire\Attributes\Validate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Services\ThermalReceiptService;
 
 new class extends Component
 {
+    use VerifiesKioskPin;
+
     public array $routes = [];
     public ?string $selectedRide = null;
     public bool $isOffline = false;
-
-    #[Validate('required|digits:6')]
-    public ?string $pin_number = null;
-
-    public ?string $pinError = null;
 
     #[Locked]
     public ?int $pinVerifiedAt = null;
@@ -31,6 +28,7 @@ new class extends Component
         }
 
         $this->fetchLiveRoutes();
+        $this->refreshPinLock();
     }
 
     public function fetchLiveRoutes(): void
@@ -82,40 +80,18 @@ new class extends Component
         return collect($this->routes[$route] ?? [])->firstWhere('type', $type);
     }
 
-    public function verifyPin(): void
+    public function verifyPin(string $pin): bool
     {
-        $this->pinError = null;
-        $this->validateOnly('pin_number');
-
-        $baseUrl = config('services.smarticct.api_url', 'https://smarticct.app');
-
-        try {
-            $response = Http::acceptJson()
-                ->timeout(6)
-                ->post("{$baseUrl}/api/card/verify", [
-                    'pin'     => $this->pin_number,
-                    'user_id' => session('kiosk_user.id'),
-                ]);
-
-            $this->pin_number = null; // never leave the PIN sitting in component state
-
-            if ($response->successful()) {
-                $this->pinVerifiedAt = now()->timestamp;
-
-                Flux::modal('verify-pin-modal')->close();
-                Flux::modal('confirm-ride')->show();
-                return;
-            }
-
-            $this->pinError = $response->json('message') ?? 'Invalid PIN number.';
-
-        } catch (\Illuminate\Http\Client\ConnectionException $e) {
-            Log::error('Kiosk fare PIN check: connection failed', ['error' => $e->getMessage()]);
-            $this->pinError = 'Unable to connect to the server. Please try again.';
-        } catch (\Throwable $e) {
-            Log::error('Kiosk fare PIN check: unexpected error', ['error' => $e->getMessage()]);
-            $this->pinError = 'Something went wrong. Please try again or contact staff.';
+        if (! $this->attemptPin($pin)) {
+            return false;
         }
+
+        $this->pinVerifiedAt = now()->timestamp;
+
+        Flux::modal('verify-pin-modal')->close();
+        Flux::modal('confirm-ride')->show();
+
+        return true;
     }
 
     public function startPaymentFlow(): void
@@ -127,6 +103,7 @@ new class extends Component
         // If PIN is missing or expired (> 2 mins), prompt for PIN first
         if (! $this->pinVerifiedAt || now()->timestamp - $this->pinVerifiedAt > 120) {
             $this->pinVerifiedAt = null;
+            $this->refreshPinLock();
             Flux::modal('verify-pin-modal')->show();
             return;
         }
@@ -134,6 +111,24 @@ new class extends Component
         // Otherwise show the confirmation modal
         Flux::modal('confirm-ride')->show();
 }
+
+    /**
+     * The charge request got no usable answer. Leave a trail for staff and tell the person to
+     * check their balance rather than pay twice. (PIN was already consumed, so a retry needs a new one.)
+     */
+    private function reportUnconfirmedPayment(string $reason): void
+    {
+        Log::warning('Kiosk fare payment unconfirmed', [
+            'user_id'     => session('kiosk_user.id'),
+            'card_uid'    => session('kiosk_card.uid'),
+            'destination' => $this->selectedRoute,
+            'fare'        => $this->selectedVehicle['fare'] ?? null,
+            'reason'      => $reason,
+        ]);
+
+        Flux::modal('confirm-ride')->close();
+        Flux::modal('payment-unconfirmed')->show();
+    }
 
     public function confirmPayment(): void
     {
@@ -144,6 +139,7 @@ new class extends Component
         if (! $this->pinVerifiedAt || now()->timestamp - $this->pinVerifiedAt > 120) {
             $this->pinVerifiedAt = null;
             Flux::modal('confirm-ride')->close();
+            $this->refreshPinLock();
             Flux::modal('verify-pin-modal')->show();
             return;
         }
@@ -164,6 +160,12 @@ new class extends Component
                     'destination'      => $this->selectedRoute,
                     'vehicle_type'     => $this->selectedVehicle['type'],
                 ]);
+
+            // A server error means we can't tell whether the fare was taken. Never say "denied" for that.
+            if ($response->serverError()) {
+                $this->reportUnconfirmedPayment((string) $response->status());
+                return;
+            }
 
             $result = $response->json();
 
@@ -203,6 +205,10 @@ new class extends Component
                 text: $result['message'] ?? 'Unable to process fare payment.',
             );
 
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            // Timed out or dropped AFTER the request may have been processed: the card might
+            // already be charged, so don't offer a plain "try again".
+            $this->reportUnconfirmedPayment($e->getMessage());
         } catch (\Exception $e) {
             Log::error('Commuter fare print/payment error', ['error' => $e->getMessage()]);
             Flux::modal('confirm-ride')->close();
@@ -371,49 +377,11 @@ new class extends Component
         </x-slot:primary>
     </x-kiosk.action-bar>
 
-    {{-- PIN Verification Modal --}}
-    <flux:modal name="verify-pin-modal" class="min-w-[24rem]">
-        <div class="space-y-6">
-            <div>
-                <flux:heading size="lg">Enter your PIN to continue</flux:heading>
-                <flux:text class="mt-2 text-sm text-light-txt-muted dark:text-dark-txt-muted">
-                    Enter the 6-digit PIN for your card to pay this fare.
-                </flux:text>
-            </div>
+    <x-kiosk.pin-modal subtitle="Enter the 6-digit PIN for your card to pay this fare." />
 
-            @if ($pinError)
-                <p class="font-secondary text-sm text-danger dark:text-dark-danger">{{ $pinError }}</p>
-            @endif
-
-            <flux:field>
-                <flux:input
-                    wire:model="pin_number"
-                    wire:keydown.enter="verifyPin"
-                    type="password"
-                    viewable
-                    maxlength="6"
-                    pattern="[0-9]*"
-                    inputmode="numeric"
-                    label="PIN"
-                />
-                <flux:error name="pin_number" />
-            </flux:field>
-
-            <div class="flex gap-2">
-                <flux:spacer />
-                <flux:modal.close>
-                    <flux:button variant="ghost">Cancel</flux:button>
-                </flux:modal.close>
-                <flux:button variant="primary" wire:click="verifyPin" wire:loading.attr="disabled" wire:target="verifyPin">
-                    <span wire:loading.remove wire:target="verifyPin">Verify PIN</span>
-                    <span wire:loading wire:target="verifyPin">Verifying...</span>
-                </flux:button>
-            </div>
-        </div>
-    </flux:modal>
+    <x-kiosk.payment-unconfirmed what="payment" />
 
     {{-- Confirmation Modal --}}
-{{-- Confirmation Modal --}}
     <flux:modal name="confirm-ride" class="w-[680px] max-w-[90vw] !bg-k-800 !border-2 !border-white/30 !rounded-[2rem] !p-8 shadow-2xl">
         @if ($this->selectedVehicle)
             <div class="space-y-6">

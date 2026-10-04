@@ -56,12 +56,12 @@
 
                 <div class="flex items-center gap-3.5">
                     @if ($isSignedIn)
-                        {{-- Tapping the name opens "My Card" (card + balance). The balance itself is never shown in the bar. --}}
+                        {{-- Tapping the name goes back to the menu. "My card" (balance) is PIN-protected and opened from there. --}}
                         <a
-                            href="{{ route('view.balance') }}"
+                            href="{{ route('menu.options') }}"
                             wire:navigate
                             class="flex h-14 max-w-[340px] items-center gap-3.5 rounded-full border-2 border-white/30 bg-k-800 py-0 pl-[7px] pr-6 text-white"
-                            aria-label="My card — {{ $kioskName }}"
+                            aria-label="Menu — {{ $kioskName }}"
                         >
                             <span class="grid size-[42px] shrink-0 place-items-center rounded-full bg-secondary font-primary text-[17px] font-extrabold tracking-wide text-primary">{{ $initials }}</span>
                             <span class="truncate text-[19px] font-bold">{{ $kioskName }}</span>
@@ -107,10 +107,10 @@
         @if (session()->has('kiosk_card'))
             <div
                 x-data="{
-                    idleMs: 45000,
-                    graceSec: 60,
+                    idleMs: {{ (int) config('kiosk.idle_seconds') * 1000 }},
+                    graceSec: {{ (int) config('kiosk.warning_seconds') }},
                     warning: false,
-                    remaining: 15,
+                    remaining: {{ (int) config('kiosk.warning_seconds') }},
                     idleTimer: null,
                     tickTimer: null,
 
@@ -137,6 +137,12 @@
                     bump() {
                         if (this.warning) return;   // only the button dismisses the warning
                         this.start();
+                    },
+                    // wire:navigate swaps the page body: stop this copy's timers so a stale one
+                    // can't fire later and send an active user to /reset.
+                    destroy() {
+                        clearTimeout(this.idleTimer);
+                        clearInterval(this.tickTimer);
                     }
                 }"
                 x-init="start()"

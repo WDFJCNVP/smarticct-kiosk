@@ -21,8 +21,8 @@ Route::livewire('/queue/vehicle', 'pages::queue-vehicle')->name('queue.vehicle')
 Route::livewire('/fare/pay', 'pages::route-selection')->name('route.select');        // commuter
 Route::livewire('/balance', 'pages::view-balance')->name('view.balance');            // operator + commuter
 
-// ── Idle timeout: called by the layout's inactivity timer ───────────────
+// ── Idle timeout --
 Route::get('/reset', function () {
-    session()->forget(['kiosk_card', 'kiosk_user', 'kiosk_vehicle', 'kiosk_route_list', 'kiosk_verified_at']);
+    session()->forget(['kiosk_card', 'kiosk_user', 'kiosk_vehicle', 'kiosk_route_list', 'kiosk_verified_at', 'kiosk_pin_verified_at']);
     return redirect()->route('kiosk.home');
 })->name('kiosk.reset');

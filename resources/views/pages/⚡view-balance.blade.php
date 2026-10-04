@@ -6,6 +6,7 @@ new class extends Component
 {
     public array $card = [];
     public array $user = [];
+    public int $visibleSeconds = 20;
 
     public function mount()
     {
@@ -14,7 +15,6 @@ new class extends Component
             return;
         }
 
-        // Balance is only visible after a recent, successful PIN check on the menu screen.
         $verifiedAt = session('kiosk_pin_verified_at');
 
         if (! $verifiedAt || now()->timestamp - $verifiedAt > 120) {
@@ -23,14 +23,36 @@ new class extends Component
             return;
         }
 
+        session()->forget('kiosk_pin_verified_at');
+
+        $this->visibleSeconds = max(5, (int) config('kiosk.balance_visible_seconds'));
         $this->card = session('kiosk_card', []);
         $this->user = session('kiosk_user', []);
+    }
+
+    public function hideBalance(): void
+    {
+        $this->redirect(route('menu.options'), navigate: true);
     }
 };
 ?>
 
 {{-- "My Card": the card artwork (drag it, tap it, or use Flip) and the card details incl. balance. --}}
-<div x-data class="flex min-h-0 flex-1 flex-col">
+<div
+    x-data="{
+        total: {{ (int) $visibleSeconds }},
+        left: {{ (int) $visibleSeconds }},
+        timer: null,
+        init() {
+            this.timer = setInterval(() => {
+                this.left = Math.max(0, this.left - 1);
+                if (this.left === 0) { clearInterval(this.timer); $wire.hideBalance(); }
+            }, 1000);
+        },
+        destroy() { clearInterval(this.timer); }
+    }"
+    class="flex min-h-0 flex-1 flex-col"
+>
     <div class="grid min-h-0 flex-1 grid-cols-2 items-center gap-10 px-10 py-6">
 
         <div class="flex flex-col items-center gap-6">
@@ -83,5 +105,15 @@ new class extends Component
                 <flux:icon name="arrow-left" class="size-7" /> Back
             </x-kiosk.button>
         </x-slot:back>
+
+        <div class="w-[460px]">
+            <div class="text-center text-xl text-tx-2">
+                <flux:icon name="eye-slash" class="mr-1 inline size-6 align-[-4px]" />
+                Hiding your balance in <b class="tabular-nums text-white" x-text="left"></b>s
+            </div>
+            <div class="mt-2.5 h-1.5 overflow-hidden rounded-full bg-white/15">
+                <i class="block h-full bg-secondary transition-[width] duration-1000 ease-linear" :style="'width:' + (left / total * 100) + '%'"></i>
+            </div>
+        </div>
     </x-kiosk.action-bar>
 </div>
