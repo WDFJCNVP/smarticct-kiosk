@@ -1,12 +1,13 @@
 {{--
     Full-screen "take your ticket" confirmation. The menu screen renders this from
-    the `kiosk_done` flash that route-selection / queue-vehicle now set on success
-    (it replaces the small corner toast). "Done" signs out via the menu's existing
-    signOut(); it also signs out by itself after 12s.
+    the `kiosk_done` flash that route-selection / queue-vehicle set on success.
+    "Back to menu" (or the auto-return timer, KIOSK_DONE_RETURN_SECONDS) just dismisses
+    this screen and shows the menu — the person stays signed in until the idle timeout.
 --}}
 @props(['done', 'isOperator' => false])
 
 @php
+    $returnSeconds = max(1, (int) config('kiosk.done_return_seconds'));
     $receipt  = $done['receipt'] ?? [];
     $isQueue  = ($done['kind'] ?? '') === 'queue';
     $amount   = (float) ($receipt['fare'] ?? $receipt['fee'] ?? 0);
@@ -20,7 +21,7 @@
     class="flex min-h-0 flex-1 flex-col"
     x-data="{
         timer: null,
-        init() { this.timer = setTimeout(() => $wire.signOut(), 12000); },
+        init() { this.timer = setTimeout(() => $wire.dismissDone(), {{ $returnSeconds }} * 1000); },
         destroy() { clearTimeout(this.timer); }
     }"
 >
@@ -96,22 +97,15 @@
     <x-kiosk.action-bar>
         <x-slot:back>
             <div class="w-[290px]">
-                <div class="text-lg text-tx-2">Signing out automatically</div>
+                <div class="text-lg text-tx-2">Returning to menu automatically</div>
                 <div class="mt-2.5 h-1.5 overflow-hidden rounded-full bg-white/15">
-                    <i class="kiosk-shrink block h-full w-full origin-left bg-secondary"></i>
+                    <i class="kiosk-shrink block h-full w-full origin-left bg-secondary" style="animation-duration: {{ $returnSeconds }}s"></i>
                 </div>
             </div>
         </x-slot:back>
 
         <x-slot:primary>
-            <div class="flex gap-4">
-                <x-kiosk.button
-                    variant="second" size="xl"
-                    href="{{ $isOperator ? route('queue.vehicle') : route('route.select') }}"
-                    wire:navigate
-                >{{ $isOperator ? 'Queue another' : 'Pay another fare' }}</x-kiosk.button>
-                <x-kiosk.button size="xl" class="w-[200px]" wire:click="signOut">Done</x-kiosk.button>
-            </div>
+            <x-kiosk.button size="xl" class="w-[240px]" wire:click="dismissDone">Back to menu</x-kiosk.button>
         </x-slot:primary>
     </x-kiosk.action-bar>
 </div>

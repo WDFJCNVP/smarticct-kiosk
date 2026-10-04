@@ -157,14 +157,14 @@ new class extends Component
   </div>
 
     {{-- Instant "Verifying…" modal: shows the moment a card is read, before the server has answered --}}
-    <div x-show="verifying && $wire.status !== 'error'" x-cloak class="absolute inset-0 z-30 flex items-center justify-center bg-k-950/85 p-6">
+    <div x-show="verifying && $wire.status !== 'error'" x-cloak class="fixed inset-0 z-40 flex items-center justify-center bg-k-950/85 p-6 backdrop-blur-md">
         <div class="w-full max-w-2xl rounded-[2rem] border-2 border-white/30 bg-k-800 p-10 shadow-2xl">
             <x-kiosk.reader-status status="processing" />
         </div>
     </div>
 
     @if ($status !== 'idle')
-        <div class="absolute inset-0 z-30 flex items-center justify-center bg-k-950/85 p-6">
+        <div class="fixed inset-0 z-40 flex items-center justify-center bg-k-950/85 p-6 backdrop-blur-md">
             <div class="w-full max-w-2xl rounded-[2rem] border-2 border-white/30 bg-k-800 p-10 shadow-2xl">
                 <x-kiosk.reader-status :status="$status" :error-message="$errorMessage" />
 
